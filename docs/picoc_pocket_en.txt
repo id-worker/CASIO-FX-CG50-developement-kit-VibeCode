@@ -1,0 +1,97 @@
+==================================================
+ PICOC POCKET REF FOR CASIO FX-CG50 (ON-CALC TXT)
+ Pure ASCII - readable in PyCEdit & Utilities!
+==================================================
+
+1. RULES OF PICOC IN UTILITIES.G3A
+- Put `main();` at the VERY END of your .c file!
+- DO NOT `#include <stdio.h>` or `<stdlib.h>` or
+  `<string.h>` - built-in C funcs need NO include!
+- NO `float` or `double` (integer math only).
+- `&&` and `||` DO NOT short-circuit! Use nested
+  `if (p != NULL) { if (p->x) ... }`.
+- C uses `struct` (not C++ `class`).
+
+2. BUILT-IN C (NO #include NEEDED)
+  Constants: NULL (0), TRUE (1), FALSE (0)
+  printf(fmt, ...)        sprintf(buf, fmt, ...)
+  exit(code)
+  malloc(sz)  calloc(n,s) realloc(p,sz)  free(p)
+  strlen(s)   strcpy(d,s) strncpy(d,s,n) strcat(d,s)
+  strcmp(a,b) strncmp(a,b,n) index(s,c)  rindex(s,c)
+  memset(p,v,n)  memcpy(d,s,n)  memcmp(a,b,n)
+  Large OS RAM (>128KB): `#include <fxcg/heap.h>`
+    p = sys_calloc(1, bytes);  sys_free(p);
+
+3. RGB565 COLORS & TEXT CONSTANTS
+  Screen: 384 x 216 px (`unsigned short` RGB565)
+  BLACK=0x0000 WHITE=0xFFFF RED=0xF800 GREEN=0x07E0
+  BLUE=0x001F  YELLOW=0xFFE0 CYAN=0x07FF MAG=0xF81F
+  GRAY=0x8410  DARK=0x4208   ORANGE=0xFD20
+  Predefined enums:
+    TEXT_COLOR_BLACK(0) BLUE(1) GREEN(2) CYAN(3)
+    RED(4) PURPLE(5) YELLOW(6) WHITE(7)
+    TEXT_MODE_NORMAL(0) INVERT(1) TRANSPARENT(0x20)
+
+4. KEY CODES
+  A) Blocking `GetKey(&k)` (`#include <fxcg/keyboard.h>`):
+     EXE=30004  EXIT=30002  DEL=30025  AC=30015
+     UP=30018   DOWN=30023  LEFT=30020 RIGHT=30021
+     F1..F6 = 30009..30014  OPTN=30008 VARS=30016
+     SHIFT=30006 ALPHA=30007  '0'..'9'=0x30..0x39
+
+  B) Fast Game Matrix (0xA44B0000, non-blocking):
+     int key_down(int c) {
+       unsigned short *r=(unsigned short*)0xA44B0000;
+       int row=c%10, col=c/10-1;
+       return (r[row>>1]&(1<<(col+((row&1)<<3))))!=0;
+     }
+     F1=79 F2=69 F3=59 F4=49 F5=39 F6=29
+     SHIFT=78 OPTN=68 VARS=58 MENU=48 LEFT=38 UP=28
+     ALPHA=77 x2=67   ^=57    EXIT=47 DOWN=37 RIGHT=27
+     7=74 8=64 9=54 DEL=44 AC=10
+     4=73 5=63 6=53 *=43   /=33
+     1=72 2=62 3=52 +=42   -=32
+     0=71 .=61 EXP=51 (-)=41 EXE=31
+
+5. GRAPHICS (`#include <fxcg/display.h>` +
+             `#include <utilities/graphicsProvider.h>`)
+  Bdisp_EnableColor(1);
+  EnableStatusArea(3);   /* full 384x216; 0=restore */
+  vram = (unsigned short*)GetVRAMAddress();
+  vram[y * 384 + x] = color;
+  Bdisp_AllClr_VRAM();
+  drawRectangle(x, y, w, h, rgb565);
+  drawLine(x1, y1, x2, y2, rgb565);
+  drawFilledCircle(cx, cy, rad, rgb565);
+  drawRGB24toRGB565(r, g, b);
+  CopySpriteMasked(data, x, y, w, h, mask_col);
+  multiPrintMini(x, y_minus_24, "Hi\n2", fg_col);
+    /* NOTE: multiPrintMini draws at (x, y + 24)! */
+  mPrintXY(col1_21, row1_8, "Text", mode, txt_col);
+  printCentered("Title", y, fg_col, bg_col);
+  Bdisp_PutDisp_DD();    /* FLUSH VRAM TO LCD! */
+
+6. TIMING & CPU (`<fxcg/rtc.h>`, `<fxcg/system.h>`,
+                 `<utilities/hardwareProvider.h>`)
+  t = RTC_GetTicks();    /* 128 ticks per second */
+  RTC_Elapsed_ms(t, ms); /* 1 if elapsed */
+  OS_InnerWait_ms(15);   /* sleep ~15 ms */
+  CPU_change_freq(25);   /* 94.3 MHz; 15 = 58 MHz */
+
+7. FILES (`#include <fxcg/file.h>`)
+  unsigned short p[64]; int sz = len;
+  Bfile_StrToName_ncpy(p, "\\\\fls0\\a.txt", 64);
+  Bfile_DeleteEntry(p);
+  Bfile_CreateEntry_OS(p, 1, &sz); /* 1=file,5=dir */
+  h = Bfile_OpenFile_OS(p, 2, 0);  /* 0=R,2=W,3=RW */
+  Bfile_WriteFile_OS(h, buf, sz);
+  Bfile_ReadFile_OS(h, buf, sz, 0);
+  Bfile_CloseFile_OS(h);
+
+8. GUI STRUCTS (`#include <utilities/structInit.h>`)
+  initMenu(&m); initMenuItem(&it); -> doMenu(&m, 0);
+  initSelector(&s);                -> doSelector(&s);
+  initTextInput(&ti);              -> doTextInput(&ti);
+  initTextArea(&ta);               -> doTextArea(&ta);
+==================================================

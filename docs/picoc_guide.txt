@@ -1,0 +1,1821 @@
+================================================================================
+   ПОЛНЫЙ УЧЕБНИК И СПРАВОЧНИК БИБЛИОТЕК PICOC ДЛЯ CASIO FX-CG50 (UTILITIES)
+   Платформа: Casio fx-CG50 / Prizm  |  Среда: Utilities.g3a (PicoC v2.1)
+   Охват: 20 встроенных C-функций + 43 заголовочных файла (524 функции API)
+================================================================================
+
+ОГЛАВЛЕНИЕ
+  1. КАК УСТРОЕН PICOC НА КАЛЬКУЛЯТОРЕ (ВАЖНЫЕ ПРАВИЛА И ОТЛИЧИЯ ОТ ПК)
+  2. ВСТРОЕННАЯ СТАНДАРТНАЯ БИБЛИОТЕКА C (ДОСТУПНА СРАЗУ БЕЗ #include)
+  3. КОНСТАНТЫ: ЦВЕТА RGB565, КЛАВИШИ, РЕЖИМЫ ФАЙЛОВ, ЧАСТОТЫ CPU
+  4. СТРУКТУРЫ («КЛАССЫ» В C) И ИХ ИНИЦИАЛИЗАЦИЯ (<utilities/structInit.h>)
+  5. СИСТЕМНЫЕ БИБЛИОТЕКИ CASIO PRIZM (<fxcg/*.h> — 9 МОДУЛЕЙ)
+     5.1 <fxcg/display.h>   — Экран, VRAM 384x216, пиксели, шрифты, окна
+     5.2 <fxcg/keyboard.h>  — Клавиатура, ожидание клавиш, матрица
+     5.3 <fxcg/file.h>      — Файловая система флеш-памяти (\\fls0\) и MCS
+     5.4 <fxcg/rtc.h>       — Таймер реального времени (128 тиков/сек) и часы
+     5.5 <fxcg/system.h>    — Питание, подсветка, паузы, скриншоты, ОС
+     5.6 <fxcg/heap.h>      — Системная куча ОС (обход лимита 128 КБ PicoC!)
+     5.7 <fxcg/misc.h>      — Перевод чисел в строки и HEX (itoa, WordToHex)
+     5.8 <fxcg/serial.h>    — Последовательный порт 2.5 мм (UART / Link)
+     5.9 <fxcg/app.h>       — Вызов системных приложений калькулятора
+  6. БИБЛИОТЕКИ UTILITIES (<utilities/*.h> — 34 МОДУЛЯ)
+     6.1 <utilities/graphicsProvider.h> — Удобная графика: круги, линии, текст
+     6.2 Готовые GUI-виджеты (menuGUI, selectorGUI, inputGUI, textGUI, textEdit)
+     6.3 Клавиатура, время, строки и железо (keyboard/time/strings/hardware)
+     6.4 Файлы, редактор, картинки и версия (file/editor/image/version)
+     6.5 Полный перечень остальных внутренних заголовков Utilities
+  7. ПРАКТИКУМ: 4 ГОТОВЫХ ШАБЛОНА ПРОГРАММ (ОТ HELLO WORLD ДО ИГРЫ И ФАЙЛОВ)
+  8. ПРИЛОЖЕНИЕ: ПОЛНЫЙ РЕЕСТР ВСЕХ 43 ЗАГОЛОВКОВ И 524 ФУНКЦИЙ PICOC
+
+
+================================================================================
+1. КАК УСТРОЕН PICOC НА КАЛЬКУЛЯТОРЕ (ВАЖНЫЕ ПРАВИЛА И ОТЛИЧИЯ ОТ ПК)
+================================================================================
+
+PicoC — это компактный интерпретатор языка C, встроенный прямо в аддин
+Utilities.g3a. Чтобы запустить программу, сохрани её на калькулятор с
+расширением .c (например, через PyCEdit), открой Utilities -> File Manager,
+наведи курсор на файл .c и нажми EXE.
+
+ПЯТЬ ГЛАВНЫХ ПРАВИЛ (ЗНАТЬ ОБЯЗАТЕЛЬНО!):
+
+1) ФУНКЦИЯ main() НЕ ВЫЗЫВАЕТСЯ САМА!
+   PicoC выполняет файл сверху вниз как скрипт (как Python). Если ты объявил
+   `int main() { ... }`, то в самой последней строчке файла обязательно допиши
+   вызов:
+       main();
+   (Либо вообще пиши команды прямо на верхнем уровне без `main()`).
+
+2) НЕ ПИШИ #include <stdio.h>, <stdlib.h>, <string.h>!
+   На калькуляторе базовые функции (`printf`, `sprintf`, `malloc`, `free`,
+   `strcpy`, `strlen`, `memcpy`, `memset` и др.) УЖЕ встроены глобально!
+   Попытка написать `#include <stdio.h>` вызовет ошибку "can't include file",
+   потому что директива `#include` нужна ТОЛЬКО для библиотек калькулятора:
+       #include <fxcg/display.h>
+       #include <utilities/graphicsProvider.h>
+   или для твоих собственных файлов на флеше: `#include "\\fls0\\mylib.c"`.
+
+3) ТОЛЬКО ЦЕЛЫЕ ЧИСЛА (НЕТ float И double)!
+   Сборка PicoC для Prizm скомпилирована с флагом `NO_FP` (без плавающей точки).
+   Используй типы: `int`, `unsigned int`, `short`, `unsigned short`, `char`,
+   `unsigned char`, указатели (`int*`, `char*`, `void*`), массивы и `struct`.
+   Совет: если нужна дробная физика/3D — используй фиксированную точку
+   (например, храни координаты умноженными на 256: `x_screen = x_fp >> 8`).
+
+4) ОПЕРАТОРЫ && И || ВЫЧИСЛЯЮТ ОБЕ ЧАСТИ!
+   В обычном C в условии `if (ptr != NULL && ptr->x == 5)` правая часть не
+   выполняется, если `ptr == NULL`. В PicoC вычисляются ОБЕ части сразу!
+   Поэтому при проверке указателей или границ массива пиши вложенные `if`:
+       if (ptr != NULL) {
+           if (ptr->x == 5) { ... }
+       }
+
+5) НЕТ КЛАССОВ C++ (`class`), ВМЕСТО НИХ — СТРУКТУРЫ C (`struct`)!
+   PicoC понимает чистый язык C, а не C++. Роль «классов» с полями выполняют
+   структуры `struct` (например, `struct Menu`, `struct FsInfo`), а роль
+   «конструкторов» — функции `initMenu(&m)` из `<utilities/structInit.h>`.
+
+
+================================================================================
+2. ВСТРОЕННАЯ СТАНДАРТНАЯ БИБЛИОТЕКА C (ДОСТУПНА СРАЗУ БЕЗ #include)
+================================================================================
+
+Встроенные глобальные константы (доступны всегда):
+  NULL   = 0
+  FALSE  = 0
+  TRUE   = 1
+
+--- Ввод, вывод и завершение программы ---
+
+  void printf(char *fmt, ...);
+      Печатает форматированный текст (%d, %u, %x, %s, %c) во внутренний буфер
+      PicoC (размер буфера — 4096 байт). Когда скрипт завершится, Utilities
+      автоматически откроет текстовое окно с этим выводом.
+
+  char *sprintf(char *buf, char *fmt, ...);
+      Форматирует строку в буфер `buf` (незаменимо для вывода очков, координат
+      и чисел на графический экран через PrintMini / multiPrintMini).
+
+  void exit(int code);
+      Мгновенно завершает выполнение скрипта и возвращает управление в Utilities
+      (безопасно выходит даже из глубоко вложенных функций).
+
+  char *gets(char *buf); / int getchar();
+      Заглушки консольного ввода (на калькуляторе возвращают NULL / 0; для
+      реального ввода используй `GetKey`, `key_down` или `doTextInput`).
+
+--- Управление памятью кучи PicoC (общий пул стека + кучи = 128 КБ) ---
+
+  void *malloc(int size);            // выделить `size` байт
+  void *calloc(int count, int size); // выделить `count * size` байт и обнулить
+  void *realloc(void *ptr, int sz);  // изменить размер блока
+  void free(void *ptr);              // освободить блок
+
+--- Строки и блоки памяти ---
+
+  int   strlen(char *s);                        // длина строки в байтах
+  void  strcpy(char *dst, char *src);           // копировать строку
+  void  strncpy(char *dst, char *src, int n);   // копировать не более n байт
+  void  strcat(char *dst, char *src);           // дописать src в конец dst
+  int   strcmp(char *a, char *b);               // 0 если равны, <0 или >0
+  int   strncmp(char *a, char *b, int n);       // сравнить первые n символов
+  char *index(char *s, int ch);                 // аналог strchr (первое вхожд.)
+  char *rindex(char *s, int ch);                // аналог strrchr (последнее)
+  void  memset(void *dst, int byte_val, int n); // заполнить память байтом
+  void  memcpy(void *dst, void *src, int n);    // скопировать n байт
+  int   memcmp(void *a, void *b, int n);        // сравнить n байт памяти
+
+
+================================================================================
+3. КОНСТАНТЫ: ЦВЕТА RGB565, КЛАВИШИ, РЕЖИМЫ ФАЙЛОВ, ЧАСТОТЫ CPU
+================================================================================
+
+ВАЖНО: в PicoC предопределены только `NULL`, `TRUE`, `FALSE`, а также
+перечисления `TEXT_COLOR_*` и `TEXT_MODE_*`. Все остальные константы из SDK
+(коды клавиш, цвета RGB565, флаги файлов) передаются числами или объявляются
+через `#define` в начале твоего скрипта!
+
+--- 3.1 Предопределённые константы (уже известны PicoC без #define) ---
+
+  Текстовые цвета (для PrintXY, mPrintXY, multiPrintXY, Menu):
+    TEXT_COLOR_BLACK  = 0      TEXT_COLOR_RED    = 4
+    TEXT_COLOR_BLUE   = 1      TEXT_COLOR_PURPLE = 5
+    TEXT_COLOR_GREEN  = 2      TEXT_COLOR_YELLOW = 6
+    TEXT_COLOR_CYAN   = 3      TEXT_COLOR_WHITE  = 7
+
+  Режимы текста (для PrintXY, mPrintXY, multiPrintXY):
+    TEXT_MODE_NORMAL                 = 0     (обычный фон)
+    TEXT_MODE_INVERT                 = 1     (инверсия / выделение)
+    TEXT_MODE_TRANSPARENT_BACKGROUND = 0x20  (прозрачный фон)
+    TEXT_MODE_AND                    = 0x21
+
+  Версии API:
+    UTILITIES_API_VERSION = 1
+    FXCG_API_VERSION      = 1
+
+--- 3.2 Геометрия экрана и 16-битные цвета RGB565 ---
+
+  Разрешение экрана: 384 x 216 пикселей (верхние 24 пикселя — статусная строка,
+  если она не отключена через `EnableStatusArea(3)`).
+  Формат пикселя в VRAM (`unsigned short`): 5 бит Red, 6 бит Green, 5 бит Blue:
+    color = ((r & 31) << 11) | ((g & 63) << 5) | (b & 31);
+  Либо готовой функцией из `<utilities/graphicsProvider.h>` (r,g,b от 0 до 255):
+    color = drawRGB24toRGB565(r, g, b);
+
+  Готовый набор #define цветов RGB565 для копирования в скрипт:
+    #define C_BLACK    0x0000
+    #define C_WHITE    0xFFFF
+    #define C_RED      0xF800
+    #define C_GREEN    0x07E0
+    #define C_BLUE     0x001F
+    #define C_YELLOW   0xFFE0
+    #define C_CYAN     0x07FF
+    #define C_MAGENTA  0xF81F
+    #define C_ORANGE   0xFD20
+    #define C_DARKGRAY 0x4208
+    #define C_GRAY     0x8410
+    #define C_LTGRAY   0xC618
+
+--- 3.3 Коды клавиш для блокирующего чтения GetKey(&key) / mGetKey(&key, 0) ---
+
+  Управляющие и функциональные клавиши:
+    #define KEY_CTRL_EXE    30004   /* EXE (Ввод) */
+    #define KEY_CTRL_EXIT   30002   /* EXIT (Выход / Назад) */
+    #define KEY_CTRL_DEL    30025   /* DEL */
+    #define KEY_CTRL_AC     30015   /* AC/ON */
+    #define KEY_CTRL_UP     30018   /* Стрелка ВВЕРХ */
+    #define KEY_CTRL_DOWN   30023   /* Стрелка ВНИЗ */
+    #define KEY_CTRL_LEFT   30020   /* Стрелка ВЛЕВО */
+    #define KEY_CTRL_RIGHT  30021   /* Стрелка ВПРАВО */
+    #define KEY_CTRL_F1     30009
+    #define KEY_CTRL_F2     30010
+    #define KEY_CTRL_F3     30011
+    #define KEY_CTRL_F4     30012
+    #define KEY_CTRL_F5     30013
+    #define KEY_CTRL_F6     30014
+    #define KEY_CTRL_SHIFT  30006
+    #define KEY_CTRL_ALPHA  30007
+    #define KEY_CTRL_OPTN   30008
+    #define KEY_CTRL_VARS   30016
+    #define KEY_CTRL_MENU   30003
+    #define KEY_CTRL_XTT    30001   /* [X,theta,T] */
+    #define KEY_CTRL_FD     30046   /* [S<->D] */
+
+  Символьные клавиши в GetKey(&key):
+    Цифры '0'..'9'  : 0x30 .. 0x39 (48 .. 57, т.е. символы '0'..'9')
+    Буквы 'A'..'Z'  : 0x41 .. 0x5A (при нажатом ALPHA)
+    Точка '.'       : 0x2E          Запятая ',' : 0x2C
+    Скобки '(' ')'  : 0x28, 0x29
+    Знаки + - * /   : 0x89 (+), 0x99 (-), 0xA9 (*), 0xB9 (/), 0x87 ( (-) )
+
+--- 3.4 Коды аппаратной матрицы клавиш (0xA44B0000 — мгновенно, для игр!) ---
+
+  `GetKey` ждёт нажатия и не видит диагонали или зажатие нескольких кнопок.
+  Для игр читай регистр клавиатуры напрямую через эту маленькую функцию:
+
+    int key_down(int code) {
+        unsigned short *kreg = (unsigned short *)0xA44B0000;
+        int row = code % 10;
+        int col = code / 10 - 1;
+        int word = row >> 1;
+        int bit = col + ((row & 1) << 3);
+        return (kreg[word] & (1 << bit)) != 0;
+    }
+
+  Таблица кодов `code` для `key_down(code)`:
+    F1=79   F2=69   F3=59   F4=49   F5=39   F6=29
+    SHIFT=78  OPTN=68  VARS=58  MENU=48  LEFT=38  UP=28
+    ALPHA=77  x^2=67   ^=57     EXIT=47  DOWN=37  RIGHT=27
+    XTT=76    log=66   ln=56    sin=46   cos=36   tan=26
+    ab/c=75   S<>D=65  (=55     )=45     ,=35     ->=25
+    7=74      8=64     9=54     DEL=44   AC/ON=10
+    4=73      5=63     6=53     *=43     /=33
+    1=72      2=62     3=52     +=42     -=32
+    0=71      .=61     EXP=51   (-)=41   EXE=31
+
+--- 3.5 Константы файловой системы (<fxcg/file.h>) ---
+
+  Пути на флеш-памяти (Storage Memory, 16 МБ) ВСЕГДА начинаются с `\\fls0\`:
+    в строках C обратный слэш экранируется дважды: "\\\\fls0\\myfile.txt"
+
+  Режимы создания Bfile_CreateEntry_OS(path, mode, &size):
+    #define CREATEMODE_FILE    1
+    #define CREATEMODE_FOLDER  5
+
+  Режимы открытия Bfile_OpenFile_OS(path, mode, 0):
+    #define READ               0
+    #define READ_SHARE         1
+    #define WRITE              2
+    #define READWRITE          3
+    #define READWRITE_SHARE    4
+
+--- 3.6 Константы частоты процессора CPU_change_freq(mul) ---
+
+    #define PLL_16x  15   /* 58.0 МГц — штатная частота калькулятора */
+    #define PLL_20x  19   /* 72.5 МГц */
+    #define PLL_24x  23   /* 87.0 МГц */
+    #define PLL_26x  25   /* 94.3 МГц — быстрый и стабильный разгон */
+    #define PLL_28x  27   /* 101.5 МГц */
+
+
+================================================================================
+4. СТРУКТУРЫ («КЛАССЫ» В C) И ИХ ИНИЦИАЛИЗАЦИЯ (<utilities/structInit.h>)
+================================================================================
+
+В C структуры (`struct`) заменяют классы с данными. Две структуры уже вшиты в
+PicoC при подключении `<fxcg/display.h>`:
+
+  1) struct display_fill {
+         int x1; int y1; int x2; int y2;
+         unsigned char mode; /* 0=стереть белым, 1=закрасить цветом, 2=инверт */
+     };
+
+  2) struct scrollbar {
+         unsigned int I1;               /* 0 */
+         unsigned int indicatormaximum; /* всего элементов */
+         unsigned int indicatorheight;  /* видимых элементов на экране */
+         unsigned int indicatorpos;     /* текущая позиция сверху */
+         unsigned int I5;               /* 0 */
+         unsigned short barleft;        /* обычно 378 */
+         unsigned short bartop;         /* верх в пикселях */
+         unsigned short barheight;      /* высота в пикселях */
+         unsigned short barwidth;       /* обычно 6 */
+     };
+
+Остальные структуры для работы с файлами и готовыми GUI-виджетами Utilities
+достаточно скопировать в начало своего скрипта, а обнулять их значениями по
+умолчанию через заголовок:
+    #include <utilities/structInit.h>
+
+Список всех 17 конструкторов из `<utilities/structInit.h>`:
+  void initMenu(void *menu);
+  void initMenuItem(void *menuItem);
+  void initSelector(void *selector);
+  void initTextInput(void *textInput);
+  void initTextElement(void *textElement);
+  void initTextArea(void *textArea);
+  void initTextEdit(void *textEdit);
+  void initFile(void *file);
+  void initAddIn(void *addin);
+  void initEventDate(void *eventDate);
+  void initEventTime(void *eventTime);
+  void initCalendarEvent(void *calEvent);
+  void initSimpleCalendarEvent(void *simpleCalEvent);
+  void initChronometer(void *chrono);
+  void initCurrency(void *currency);
+  void initTransaction(void *tx);
+  void initTOTP(void *totp);
+
+--- Готовые описания самых нужных структур (просто скопируй нужную в свой .c) ---
+
+[A] Информация о найденном файле (для Bfile_FindFirst_NON_SMEM):
+    struct FsInfo {
+        unsigned short id;
+        unsigned short type;      /* 0x0000 = папка, иначе файл */
+        unsigned long  fsize;     /* размер файла в байтах */
+        unsigned long  dsize;
+        unsigned int   property;
+        unsigned long  address;
+    };
+
+[B] Пункт меню и Меню (для <utilities/menuGUI.h> -> doMenu):
+    struct MenuItem {
+        char *text;       /* текст строки (обязательно!) */
+        int type;         /* 0=обычный, 1=чекбокс, 2=разделитель */
+        int value;        /* для чекбокса: 0=снят, 1=отмечен */
+        int color;        /* TEXT_COLOR_BLACK (0) .. TEXT_COLOR_WHITE (7) */
+        int isfolder;     /* 1 = рисовать иконку папки (в MULTISELECT) */
+        int isselected;   /* 1 = выделен галочкой */
+        int icon;         /* -1 = без иконки */
+    };
+
+    struct Menu {
+        char *statusText;
+        char *title;      /* заголовок сверху (или NULL) */
+        char *subtitle;
+        int titleColor;   /* по умолчанию TEXT_COLOR_BLUE (1) */
+        char *nodatamsg;  /* текст, если список пуст */
+        int startX;       /* в знакоместах 1..21 (по умолч. 1) */
+        int startY;       /* в строках 1..8 (по умолч. 1) */
+        int width;        /* ширина в символах (по умолч. 21) */
+        int height;       /* высота в строках (по умолч. 8) */
+        int scrollout;
+        int numitems;     /* количество элементов в массиве items */
+        int type;         /* 0=обычное меню, 1=мультивыбор, 3=с F-кнопками */
+        int selection;    /* выбранный пункт, НУМЕРАЦИЯ С 1! */
+        int scroll;
+        int fkeypage;
+        int numselitems;
+        int returnOnInfiniteScrolling;
+        int returnOnLeft;
+        int returnOnRight;
+        int darken;
+        int miniMiniTitle;
+        int pBaRtR;
+        struct MenuItem *items; /* указатель на массив пунктов */
+    };
+
+[C] Выбор числа стрелками Вверх/Вниз (для <utilities/selectorGUI.h> -> doSelector):
+    struct Selector {
+        char *title;      /* синий заголовок окна */
+        char *subtitle;   /* подзаголовок */
+        int value;        /* текущее значение (сюда же запишется результат!) */
+        int max;          /* максимум */
+        int min;          /* минимум */
+        int cycle;        /* 1 = зацикливать при переходе через край */
+        int type;         /* 0 = обычный числовой селектор */
+        int clearVRAM;    /* 1 = очищать экран перед отрисовкой */
+    };
+
+[D] Поле ввода строки/числа (для <utilities/inputGUI.h> -> doTextInput):
+    struct TextInput {
+        int type;         /* 0=текст, 1=дата, 2=время, 3=число */
+        int x;            /* столбец 1..21 */
+        int y;            /* строка 1..8 */
+        int width;        /* ширина в символах (макс. 21) */
+        int forcetext;    /* 1 = запретить пустой ввод */
+        int charlimit;    /* макс. длина строки в байтах */
+        int symbols;      /* 1 = разрешить экран спецсимволов */
+        int key;          /* 0 */
+        int acceptF6;     /* 1 = принимать F6 как подтверждение */
+        int cursor;       /* позиция курсора (0) */
+        int start;        /* прокрутка (0) */
+        char *buffer;     /* указатель на твой char buf[...]! */
+    };
+
+[E] Форматированный прокручиваемый текст (<utilities/textGUI.h> -> doTextArea):
+    struct TextElement {
+        char *text;
+        unsigned short color; /* RGB565 цвет текста, напр. 0x0000 */
+        char newLine;         /* 1 = начать с новой строки */
+        char spaceAtEnd;      /* 1 = добавить пробел в конце */
+        char lineSpacing;     /* доп. отступ сверху в пикселях */
+        char minimini;        /* 1 = мелкий шрифт */
+    };
+
+    struct TextArea {
+        int x; int y; int width; /* в пикселях: 0, 0, 384 */
+        int lineHeight;          /* 17 */
+        struct TextElement *elements;
+        int numelements;
+        char *title;
+        int scrollbar;           /* 1 = показывать скроллбар */
+        int allowEXE;            /* 1 = закрывать по EXE */
+        int allowLeft;           /* 1 = закрывать по стрелке Влево */
+        int allowF1;
+        int type;                /* 0 = обычный просмотр */
+        int shadowCursorX; int shadowCursorY;
+        int scroll; int cursor; int updateCursor;
+    };
+
+
+================================================================================
+5. СИСТЕМНЫЕ БИБЛИОТЕКИ CASIO PRIZM (<fxcg/*.h> — 9 МОДУЛЕЙ)
+================================================================================
+
+--------------------------------------------------------------------------------
+5.1 <fxcg/display.h> — Экран, VRAM (384x216 RGB565), пиксели, шрифты, окна
+--------------------------------------------------------------------------------
+Экран работает по схеме двойной буферизации:
+  1) Все функции рисования пишут в оперативный видеобуфер VRAM (384x216 точек).
+  2) На физическом экране изменения появятся ТОЛЬКО после вызова `Bdisp_PutDisp_DD();`!
+
+Главные функции экрана и VRAM:
+  void *GetVRAMAddress(void);
+      Возвращает прямой указатель на видеобуфер `384 * 216` пикселей RGB565.
+      Самый быстрый способ рисовать пиксели в играх и 3D:
+          unsigned short *vram = (unsigned short *)GetVRAMAddress();
+          vram[y * 384 + x] = 0xF800; /* красный пиксель в (x, y) */
+
+  void Bdisp_EnableColor(int mode);
+      1 = включить полный 16-битный цвет (65536 цветов), 0 = 8-цветный режим.
+
+  void EnableStatusArea(int mode);
+      Управление верхней 24-пиксельной статусной полоской ОС:
+      3 = ОТКЛЮЧИТЬ статус-бар (отдаёт тебе весь экран 384x216!),
+      0 = включить обратно перед выходом из программы (`EnableStatusArea(0);`).
+
+  void Bdisp_AllClr_VRAM(void);
+      Очищает весь VRAM белым цветом.
+
+  void Bdisp_Fill_VRAM(int color, int mode);
+      Заливает область экрана цветом RGB565 (`mode`: 3 или 4 — весь экран).
+
+  void Bdisp_PutDisp_DD(void);
+      Копирует весь буфер VRAM (384x216) на физический дисплей.
+
+  void Bdisp_PutDisp_DD_stripe(int y1, int y2);
+      Отправляет на дисплей только полосу строк от `y1` до `y2` (быстрее!).
+
+  void Bdisp_SetPoint_VRAM(int x, int y, int color);
+  unsigned short Bdisp_GetPoint_VRAM(int x, int y);
+      Поставить / прочитать цвет одного пикселя в VRAM.
+
+  void DirectDrawRectangle(int x1, int y1, int x2, int y2, unsigned short col);
+      Заливает прямоугольник напрямую на дисплей (минуя VRAM). Для рисования
+      в VRAM удобнее `drawRectangle(x, y, w, h, col)` из `graphicsProvider.h`.
+
+  void Bdisp_AreaClr(struct display_fill *area, unsigned char target,
+                     unsigned short color);
+      Заливка/очистка/инверсия области `area` (`target = 1` для VRAM).
+
+  void SaveVRAM_1(void); / void LoadVRAM_1(void);
+      Мгновенно сохранить текущий экран в системный карман и восстановить его.
+
+  void DrawFrame(int color);
+      Закрашивает декоративную рамку вокруг области 384x216 (напр. `0x0000`).
+
+Вывод текста и спрайтов в <fxcg/display.h>:
+  void PrintXY(int col, int row, char *msg, int mode, int text_color);
+      Крупный табличный шрифт (сетка 21 столбец x 8 строк, `col=1..21`, `row=1..8`).
+      ВНИМАНИЕ: системная `PrintXY` пропускает первые 2 байта строки `msg`!
+      Передавай строку вида `"  Hello"` (с двумя пробелами в начале) ИЛИ
+      используй удобную `mPrintXY(col, row, "Hello", mode, color)` из
+      `<utilities/graphicsProvider.h>`, где эти 2 байта не нужны!
+
+  void PrintMini(int *x, int *y, char *str, int mode_flags,
+                 unsigned int xlimit, int P6, int P7,
+                 int fg_color, int bg_color, int writeflag, int P11);
+      Системный мелкий пропорциональный шрифт (~18 пикселей в высоту) по точным
+      пиксельным координатам `x` (0..383) и `y`:
+      - Если `mode_flags = 0`: `y` отсчитывается под статус-баром (+24 px);
+        рисуется непрозрачный фон цвета `bg_color`.
+      - Если `mode_flags = 0x02`: прозрачный фон (+24 px к `y`).
+      - Если `mode_flags = 0x40`: чистые координаты экрана `0..215` с фоном!
+      - Если `mode_flags = 0x42`: чистые координаты `0..215` + прозрачный фон!
+      Пример:
+        int x = 10; int y = 6;
+        PrintMini(&x, &y, "Score: 100", 0x42, 0xFFFFFFFF, 0, 0, 0xFFFF, 0, 1, 0);
+
+  void PrintMiniMini(int *x, int *y, char *str, int mode1, char color, int mode2);
+      Сверхмелкий шрифт (высота ~10 пикселей; `color` — `TEXT_COLOR_*` 0..7).
+
+  void VRAM_CopySprite(unsigned short *data, int x, int y, int width, int height);
+  void VRAM_XORSprite(unsigned short *data, int x, int y, int width, unsigned int h);
+      Копирует массив RGB565-пикселей размера `width * height` в VRAM.
+
+  void MsgBoxPush(int lines); / void MsgBoxPop(void);
+      Рисует стандартную всплывающую рамку сообщения ОС на `lines` строк (1..6)
+      поверх экрана (сохраняя фон!) и закрывает её с восстановлением фона.
+
+  void Scrollbar(struct scrollbar *sb);
+  void ProgressBar(int current, int total);
+  void ProgressBar2(unsigned char *heading, int current, int total);
+  void FKey_Display(int pos_0_to_5, void *bitmap_ptr);
+  void GetFKeyPtr(int fkey_sys_id, void *out_ptr);
+
+--------------------------------------------------------------------------------
+5.2 <fxcg/keyboard.h> — Клавиатура
+--------------------------------------------------------------------------------
+  int GetKey(int *key);
+      Ждёт нажатия клавиши, записывает её код (`KEY_CTRL_*` или код символа) в
+      `*key`. Автоматически обрабатывает клавишу MENU (переход в главное меню
+      калькулятора) и мигание индикаторов SHIFT/ALPHA.
+
+  int GetKeyWait_OS(int *col, int *row, int wait_type, int timeout_ticks,
+                    int menu_allow, unsigned short *keycode);
+      Опрос клавиатуры с таймаутом или без блокировки:
+      - `wait_type = 0`: ждать нажатия бесконечно (`HALTON_TIMEROFF`)
+      - `wait_type = 1`: НЕ ждать, проверить мгновенно (`HALTOFF_TIMEROFF`)
+      - `wait_type = 2`: ждать не дольше `timeout_ticks` (`HALTON_TIMERON`)
+      Возвращает `1` если была нажата кнопка, `0` если пусто, `2` по таймауту.
+
+  int PRGM_GetKey(void);
+      Неблокирующее чтение матричного кода нажатой кнопки (возвращает `0`, если
+      ничего не нажато, иначе код матрицы `10..79` как в таблице 3.4!).
+
+  void Bkey_ClrAllFlags(void);
+      Сбрасывает залипшие модификаторы SHIFT / ALPHA.
+
+--------------------------------------------------------------------------------
+5.3 <fxcg/file.h> — Файловая система флеша (\\fls0\) и Main Memory (MCS)
+--------------------------------------------------------------------------------
+ВАЖНЫЕ ПРАВИЛА ФАЙЛОВОЙ СИСТЕМЫ CASIO BFILE:
+  1) Все пути передаются в `Bfile_*` не как `char*`, а как 16-битный массив
+     `unsigned short path[64]`, сконвертированный функцией `Bfile_StrToName_ncpy`!
+  2) Перед созданием файла (`Bfile_CreateEntry_OS`), если такой файл уже может
+     существовать, ОБЯЗАТЕЛЬНО сначала удали старый через `Bfile_DeleteEntry`!
+  3) Нельзя создавать файл размера `0` байт — размер `size` должен быть `>= 1`!
+  4) Во время работы `Bfile_FindFirst` / `FindNext` НЕ вызывай `Create` / `Delete` /
+     `Rename` до тех пор, пока не закроешь поиск через `Bfile_FindClose(fh)`!
+
+Основные функции флеш-памяти (`\\fls0\`):
+  void Bfile_StrToName_ncpy(unsigned short *dst16, char *src_ascii, unsigned int max);
+      Переводит ASCII-путь `"\\\\fls0\\data.bin"` в 16-битный формат ОС.
+
+  void Bfile_NameToStr_ncpy(char *dst_ascii, unsigned short *src16, unsigned int max);
+      Переводит 16-битное имя файла обратно в обычную строку `char*`.
+
+  int Bfile_CreateEntry_OS(unsigned short *path16, int mode, int *size);
+      Создаёт файл (`mode = 1`, `size` — указатель на `int` с размером в байтах)
+      или папку (`mode = 5`, вместо `&size` можно передать `NULL`).
+      Возвращает `>= 0` при успехе, `< 0` при ошибке.
+
+  int Bfile_OpenFile_OS(unsigned short *path16, int mode, int zero);
+      Открывает файл (`mode`: `0`=READ, `2`=WRITE, `3`=READWRITE; третий аргумент `0`).
+      Возвращает дескриптор `handle >= 0` (или `< 0`, если файл не найден).
+
+  int Bfile_GetFileSize_OS(int handle);
+      Возвращает размер открытого файла в байтах.
+
+  int Bfile_ReadFile_OS(int handle, void *buf, int size, int readpos);
+      Читает `size` байт в `buf`. `readpos = 0` — читать с начала файла;
+      `readpos = -1` — продолжать чтение с текущей позиции курсора!
+
+  int Bfile_WriteFile_OS(int handle, void *buf, int size);
+      Записывает `size` байт из `buf` в открытый файл.
+
+  int Bfile_SeekFile_OS(int handle, int pos);
+  int Bfile_TellFile_OS(int handle);
+      Перемещает позицию чтения/записи в файле и узнаёт текущее смещение.
+
+  int Bfile_CloseFile_OS(int handle);
+      Обязательно закрывает открытый файл!
+
+  int Bfile_DeleteEntry(unsigned short *path16);
+  int Bfile_RenameEntry(unsigned short *old_path16, unsigned short *new_path16);
+      Удалить или переименовать файл/папку.
+
+  int Bfile_FindFirst_NON_SMEM(char *mask16, int *find_handle,
+                               char *found16, void *fsinfo_ptr);
+  int Bfile_FindNext_NON_SMEM(int find_handle, char *found16, char *fsinfo_ptr);
+  int Bfile_FindClose(int find_handle);
+      Перебор файлов по маске (например `"\\\\fls0\\*.txt"`). Возвращает `0`,
+      пока находятся файлы (пример использования см. в `utilities/py2c.c`).
+
+  int Bfile_GetMediaFree_OS(unsigned short *media_id, int *freespace_out);
+      Узнать свободное место на флеш-памяти в байтах.
+
+Функции Main Memory (`MCS_*` — оперативная память переменных и BASIC-программ):
+  int MCS_CreateDirectory(unsigned char *dir);
+  int MCS_DeleteDirectory(unsigned char *dir);
+  int MCSPutVar2(unsigned char *dir, unsigned char *item, int len, void *buf);
+  int MCSOvwDat2(unsigned char *dir, unsigned char *item, int len, void *buf, int off);
+  int MCSGetDlen2(unsigned char *dir, unsigned char *item, int *data_len);
+  int MCSGetData1(int offset, int len_to_copy, void *buffer);
+  int MCSDelVar2(unsigned char *dir, unsigned char *item);
+  int MCS_GetState(int *maxspace, int *currentload, int *remainingspace);
+
+--------------------------------------------------------------------------------
+5.4 <fxcg/rtc.h> — Таймер и часы реального времени
+--------------------------------------------------------------------------------
+  int RTC_GetTicks(void);
+      Возвращает показания аппаратного счётчика — ровно 128 тиков в секунду
+      (1 тик ≈ 7.8125 мс). Идеально для замера FPS и игровых таймеров!
+
+  int RTC_Elapsed_ms(int start_ticks, int duration_ms);
+      Возвращает `1`, если с момента `start_ticks = RTC_GetTicks()` уже прошло
+      не менее `duration_ms` миллисекунд, иначе `0`.
+
+  void RTC_GetTime(unsigned int *hour, unsigned int *min,
+                   unsigned int *sec, unsigned int *millisec);
+      Читает текущее время часов (значения в формате BCD; для готовых обычных
+      чисел `int` удобнее функции `getCurrentHour()` из `utilities/timeProvider.h`!).
+
+--------------------------------------------------------------------------------
+5.5 <fxcg/system.h> — Задержки, питание, подсветка и ОС
+--------------------------------------------------------------------------------
+  void OS_InnerWait_ms(int ms);
+      Пауза на `ms` миллисекунд с энергосбережением CPU (используй в игровом
+      цикле `OS_InnerWait_ms(15);` для ~60 FPS).
+
+  void CMT_Delay_micros(int us); / void CMT_Delay_100micros(int units);
+      Точные микросекундные задержки.
+
+  int  GetMainBatteryVoltage(int one); /* передай 1 -> вернёт сотые вольта, напр. 542 = 5.42 В */
+  int  GetBatteryType(void);
+  char GetBacklightDuration(void);     / void SetBacklightDuration(char half_mins);
+  int  GetAutoPowerOffTime(void);      / void SetAutoPowerOffTime(int minutes);
+  void TakeScreenshot(void);           /* сохранить BMP скриншот средствами ОС */
+  void DisplayMainMenu(void);
+  void PowerOff(int show_logo);
+  void Restart(void);                  /* ВНИМАНИЕ: полная перезагрузка калькулятора! */
+  int  GlibGetOSVersionInfo(char *a, char *b, short *c, short *d); /* версия прошивки */
+
+--------------------------------------------------------------------------------
+5.6 <fxcg/heap.h> — Системная куча ОС (СЕКРЕТ БОЛЬШОЙ ПАМЯТИ!)
+--------------------------------------------------------------------------------
+Собственная куча PicoC ограничена 128 КБ (вместе с кодом программы и стеком).
+Но у самой ОС калькулятора свободно ещё ~400..600 КБ системной кучи!
+
+  void *sys_calloc(int count, int size);
+      Выделяет `count * size` байт напрямую из большой системной кучи ОС и
+      заполняет нулями!
+      ВАЖНАЯ ТОНКОСТЬ: используй именно `sys_calloc(1, bytes)`, а НЕ `sys_malloc`
+      (в обёртке Utilities у `sys_malloc` ошибочно прописан прототип с 3 аргументами).
+
+  void *sys_realloc(void *ptr, int new_size);
+  void  sys_free(void *ptr);
+      Обязательно освободи выделенную через `sys_calloc` память вызовом
+      `sys_free(ptr)` перед выходом из своего скрипта, иначе она останется
+      занятой до выхода из аддина!
+
+--------------------------------------------------------------------------------
+5.7 <fxcg/misc.h> — Быстрые конвертеры чисел и HEX
+--------------------------------------------------------------------------------
+  void itoa(int value, unsigned char *buf);       /* число со знаком -> строка */
+  int  ItoA_10digit(int value, void *buf);        /* 10-значная строка */
+  void ByteToHex(unsigned char val, unsigned char *out2);   /* 1 байт -> 2 HEX-символа */
+  void WordToHex(unsigned short val, unsigned char *out4);  /* 2 байта -> 4 HEX-символа */
+  void LongToAscHex(int val, unsigned char *buf, int digits);
+  void HexToByte(unsigned char *in2, unsigned char *out);
+  void HexToWord(unsigned char *in4, unsigned short *out);
+
+--------------------------------------------------------------------------------
+5.8 <fxcg/serial.h> — Последовательный порт 2.5 мм (3-pin Serial / UART)
+--------------------------------------------------------------------------------
+  int Serial_Open(unsigned char *mode_6bytes);
+      /* mode = {0, baud, parity, len, stop, 0}; baud: 5=9600, 7=38400, 9=115200 */
+  int Serial_IsOpen(void);
+  int Serial_Close(int mode); /* mode = 1 */
+  int Serial_Read(unsigned char *buf, int max_size, short *bytes_read);
+  int Serial_ReadSingle(unsigned char *byte_out);
+  int Serial_Write(unsigned char *buf, int count);
+  int Serial_WriteSingle(unsigned char byte_val);
+  int Serial_PollRX(void);    /* сколько байт ждёт в приёмном буфере */
+  int Serial_PollTX(void);    /* сколько свободно в буфере отправки */
+  int Serial_ClearRX(void);   / int Serial_ClearTX(void);
+
+--------------------------------------------------------------------------------
+5.9 <fxcg/app.h> — Переход в системные приложения калькулятора
+--------------------------------------------------------------------------------
+  void APP_RUNMAT(int, int);  void APP_FINANCE(int, int);
+  void APP_SYSTEM(void);      void APP_SYSTEM_VERSION(void);
+  void APP_MEMORY(void);      void APP_SYSTEM_BATTERY(int);
+  void APP_SYSTEM_POWER(int); void APP_SYSTEM_DISPLAY(int);
+
+
+================================================================================
+6. БИБЛИОТЕКИ UTILITIES (<utilities/*.h> — 34 МОДУЛЯ)
+================================================================================
+
+Помимо низкоуровневых сисколлов Casio, Utilities даёт готовые высокоуровневые
+функции для рисования фигур, красивых меню, часов, разгона CPU и работы со
+строками и файлами!
+
+--------------------------------------------------------------------------------
+6.1 <utilities/graphicsProvider.h> — Рисование фигур, текста и спрайтов (28 шт.)
+--------------------------------------------------------------------------------
+Все функции рисуют в буфер VRAM (после кадра вызывай `Bdisp_PutDisp_DD();`):
+
+  void drawRectangle(int x, int y, int width, int height, unsigned short color);
+      Залитый прямоугольник в пикселях экрана (`x = 0..383`, `y = 0..215`).
+      Обрати внимание: 3-й и 4-й параметры — это ШИРИНА и ВЫСОТА (а не x2, y2)!
+
+  void drawLine(int x1, int y1, int x2, int y2, int color);
+      Отрезок линии Брезенхема произвольного наклона цветом RGB565.
+
+  void drawFilledCircle(int cx, int cy, int radius, unsigned short color);
+      Залитый круг с центром `(cx, cy)` и радиусом `radius` пикселей.
+
+  void drawCircularCountdownIndicator(int cx, int cy, int radius,
+                                      unsigned short fg, unsigned short bg,
+                                      int inner, int swap);
+      Круговой индикатор / кольцо.
+
+  int  drawRGB24toRGB565(int r, int g, int b);
+      Конвертирует привычный RGB (0..255, 0..255, 0..255) в 16-битный цвет RGB565!
+
+  void invertArea(short x, short y, short width, short height);
+      Негатив (инверсия цветов) прямоугольной области.
+
+  void replaceColorInArea(int x, int y, int w, int h,
+                          unsigned short old_col, unsigned short new_col);
+      Заменяет один цвет другим внутри прямоугольника `(x, y, w, h)`.
+
+  void CopySpriteMasked(unsigned short *data, int x, int y, int w, int h,
+                        unsigned short mask_color);
+      Рисует RGB565-спрайт с прозрачным цветом `mask_color`!
+
+  void CopySpriteNbitMasked(unsigned char *data, int x, int y, int w, int h,
+                            unsigned short *palette, unsigned short mask_col,
+                            unsigned int bitwidth);
+      Компактный палитровый спрайт (1, 2, 4 или 8 бит на пиксель!).
+
+  void multiPrintMini(int x, int y, char *msg, int fgcolor);
+      Печатает мелкий текст с прозрачным фоном и поддержкой переноса строк `\n`!
+      ВАЖНАЯ ОСОБЕННОСТЬ КООРДИНАТЫ Y: внутри `multiPrintMini` используется
+      системный отступ статус-бара (+24 пикселя), поэтому реальная координата на
+      экране равна `y + 24`!
+      - Чтобы написать на самой верхней строке экрана (`y_экр = 2`), передай `y = -22`!
+      - Чтобы написать на `y_экр = 100`, передай `y = 76` (`100 - 24`)!
+
+  void mPrintXY(int x, int y, char *msg, int mode, int text_color);
+      Удобная замена системной `PrintXY` (`x = 1..21`, `y = 1..8`, НЕ требует
+      двух пустых байтов в начале строки!).
+
+  void multiPrintXY(int x, int y, char *msg, int mode, int text_color);
+      Как `mPrintXY`, но понимает символ новой строки `\n`.
+
+  void printCentered(char *text, int y, int fg_rgb565, int bg_rgb565);
+      Печатает строку ровно по центру экрана по горизонтали!
+
+  void clearLine(int x, int y, unsigned short color);
+      Очищает текстовую строку сетки `(1..21, 1..8)` заданным цветом.
+
+  void drawScreenTitle(char *title, char *subtitle);
+      Рисует фирменный синий заголовок окна Utilities (`subtitle` может быть `NULL`).
+
+  void drawFkeyLabels(int f1, int f2, int f3, int f4, int f5, int f6);
+      Рисует системные иконки подписей над кнопками F1..F6 (`-1` = пустой слот).
+      Примеры полезных ID иконок ОС Casio:
+        0x003B = EDIT,  0x0038 = DEL,  0x0186 = NEW,  0x0307 = SAVE,
+        0x049F = OPEN,  0x005F = EXEC, 0x0262 = YES,  0x0263 = NO.
+
+  void drawFkeyPopup(int fkey_0_to_5, char *title);
+  void darkenStatusbar(void); / void darkenFkeys(int numkeys);
+  void progressMessage(char *msg, int cur, int total);
+  void closeProgressMessage(void);
+  void mMsgBoxPush(int lines); / void mMsgBoxPop(void); / void popAllMsgBoxes(void);
+
+--------------------------------------------------------------------------------
+6.2 Готовые GUI-виджеты Utilities (меню, выбор чисел, ввод текста, окна)
+--------------------------------------------------------------------------------
+Вместе с `#include <utilities/structInit.h>` (см. структуры в Разделе 4):
+
+  <utilities/menuGUI.h>
+    int doMenu(void *menu_ptr, void *icon_table_or_NULL);
+        Показывает готовое прокручиваемое меню `struct Menu`!
+        Возвращает: `1` (`MENU_RETURN_SELECTION`) при нажатии EXE (выбранный
+        индекс лежит в `menu.selection` от `1` до `numitems`), либо `0`
+        (`MENU_RETURN_EXIT`) при нажатии EXIT!
+    int closeMsgBox(int yes_no, int lines);
+
+  <utilities/selectorGUI.h>
+    int doSelector(void *selector_ptr);
+        Всплывающее окно выбора числа стрелками Вверх/Вниз (`struct Selector`).
+        Возвращает `1` при подтверждении EXE (число в `sel.value`), `0` по EXIT.
+
+  <utilities/inputGUI.h>
+    int doTextInput(void *textInput_ptr);
+        Однострочное поле ввода текста/числа с поддержкой ALPHA, SHIFT, курсора
+        и удаления (`struct TextInput`). Возвращает `1` по EXE, `0` по EXIT.
+
+  <utilities/textGUI.h>
+    int doTextArea(void *textArea_ptr);
+        Полноэкранная читалка многострочного цветного текста со скроллбаром!
+
+  <utilities/textEditGUI.h>
+    int doTextEdit(void *textEdit_ptr);
+        Многострочное редактируемое текстовое поле.
+
+--------------------------------------------------------------------------------
+6.3 Клавиатура, время, строки и железо
+--------------------------------------------------------------------------------
+  <utilities/keyboardProvider.h>
+    void mGetKey(int *key, int darken_mode);
+        Улучшенный `GetKey(&key)` с поддержкой автоотключения подсветки и
+        системных хоткеев Utilities (`darken_mode = 0`).
+    void setmGetKeyMode(int mode); /* 0=обычный, 2=запретить Shift+Exit */
+    unsigned int SetGetkeyToMainFunctionReturnFlag(unsigned int enabled);
+
+  <utilities/timeProvider.h>  (33 функции удобной работы с датой и временем!)
+    int   getCurrentYear();          int getCurrentHour();
+    int   getCurrentMonth();         int getCurrentMinute();
+    int   getCurrentDay();           int getCurrentSecond();
+                                     int getCurrentMillisecond();
+    char *getCurrentDOWAsString();   /* "Monday" .. "Sunday" */
+    char *getCurrentMonthAsString(); /* "January" .. "December" */
+    int   isLeap(int year);          /* 1 если високосный */
+    int   dow(int y, int m, int d);  /* день недели */
+    int   getMonthDaysWithLeap(int month, int year);
+    void  blockForMilliseconds(int ms);
+    void  blockForTicks(int ticks);
+    void  setTime(int h, int m, int s);
+    void  setDate(int y, int m, int d);
+
+  <utilities/hardwareProvider.h>  (частота процессора, подсветка, модель)
+    void CPU_change_freq(int pll_mul);
+        Меняет частоту процессора SH4A на лету!
+        `CPU_change_freq(25);` -> разгон до 94.3 МГц (в 1.6 раза быстрее!);
+        `CPU_change_freq(15);` -> вернуть штатные 58 МГц перед выходом!
+    int  getRawBacklightSubLevel(void);
+    void setRawBacklightSubLevel(int level_0_to_249);
+    int  getHardwareModel(void);
+    int  getIsEmulated(void); /* 1 на эмуляторе ПК, 0 на реальном калькуляторе */
+    void getHardwareID(char *out8);
+
+  <utilities/stringsProvider.h>  (полезные строковые утилиты)
+    char *toksplit(char *src, char delim, char *token_out, int max_len);
+        Разбивает строку по разделителю `delim` (напр. `','` или `'\n'`), кладёт
+        очередной кусок в `token_out` и возвращает указатель на остаток строки!
+    int   strEndsWith(char *str, char *suffix); /* 1 если заканчивается на suffix */
+    char *strncpy_replace(char *dst, char *src, int len, char oldc, char newc);
+    void *memmem(char *haystack, int hlen, char *needle, int nlen, int matchcase);
+    int   base32_decode(unsigned char *encoded, unsigned char *res, int bufLen);
+
+--------------------------------------------------------------------------------
+6.4 Файлы, редактор, просмотр картинок и версия Utilities
+--------------------------------------------------------------------------------
+  <utilities/fileProvider.h>
+    void copyFile(char *src_path, char *dst_path);
+    void renameFile(char *old_path, char *new_path);
+    void createFolderRecursive(char *folder_path);
+    char *filenameToName(char *full_path); /* "\\\\fls0\\a\\b.txt" -> "b.txt" */
+    int  stringEndsInG3A(char *s); / int stringEndsInJPG(char *s);
+    void compressFile(char *src, char *dst, int action, int silent);
+    int  isFileCompressed(char *filename, int *origsize_out);
+
+  <utilities/fileGUI.h>
+    void viewFileAsText(char *filename); /* открыть встроенный просмотрщик текста */
+    int  overwriteFilePrompt(char *filename);
+
+  <utilities/editorGUI.h>
+    void textfileEditor(char *filename, char *create_from_str_or_NULL);
+
+  <utilities/imageGUI.h>
+    void viewImage(char *filename); /* показать BMP / JPG / G3P файл на экране! */
+
+  <utilities/versionProvider.h>
+    char *getVersion();    /* строка версии сборки Utilities, напр. "v2.1-cg50..." */
+    char *getTimestamp();  /* дата и время компиляции аддина */
+    int   isBuildExpired();
+
+--------------------------------------------------------------------------------
+6.5 Остальные внутренние заголовки Utilities (доступны при необходимости)
+--------------------------------------------------------------------------------
+  <utilities/aboutGUI.h>         aboutScreen()
+  <utilities/calendarGUI.h>      viewCalendar(mode), selectDateScreen(...)
+  <utilities/calendarProvider.h> getEvents(...), addEvent(...), removeEvent(...)
+  <utilities/chronoGUI.h>        chronoScreen()
+  <utilities/chronoProvider.h>   setChrono(...), startChrono(...), stopChrono(...)
+  <utilities/firstRunGUI.h>      firstRunWizard()
+  <utilities/homeGUI.h>          homeScreen(pane)
+  <utilities/lightGUI.h>         lantern(), morseLight(), colorLight()
+  <utilities/lockGUI.h>          passwordInput(...), lockApp()
+  <utilities/lockProvider.h>     hashPassword(...), comparePasswordHash(...)
+  <utilities/memsysGUI.h>        memoryCapacityScreen(m), addinManager(), systemInfo()
+  <utilities/powerGUI.h>         powerInformation(), setBacklightLevel()
+  <utilities/settingsGUI.h>      settingsMenu()
+  <utilities/settingsProvider.h> getSetting(id), setSetting(id, val, save)
+  <utilities/tasksGUI.h>         viewTasks()
+  <utilities/timeGUI.h>          drawAnalogClock(...), setTimeScreen(m)
+  <utilities/toolsGUI.h>         balanceManager(), passwordGenerator(), totpClient()
+  <utilities/toolsProvider.h>    generateRandomString(...), computeTOTP(...)
+
+
+================================================================================
+7. ПРАКТИКУМ: 4 ГОТОВЫХ ШАБЛОНА ПРОГРАММ
+================================================================================
+
+--------------------------------------------------------------------------------
+ШАБЛОН 1. Простой консольный скрипт (вывод текста и таблицы расчётов)
+--------------------------------------------------------------------------------
+/* hello.c — не требует ни одного #include! */
+int main() {
+    int i;
+    printf("=== Таблица квадратов и кубов ===\n");
+    for (i = 1; i <= 10; i++) {
+        printf("%d^2 = %d,   %d^3 = %d\n", i, i * i, i, i * i * i);
+    }
+    return 0;
+}
+
+main();
+
+
+--------------------------------------------------------------------------------
+ШАБЛОН 2. Игровой цикл 60 FPS с плавным движением и графикой 384x216
+--------------------------------------------------------------------------------
+/* game_template.c — стрелки двигают шар (с диагоналями!), EXIT выходит */
+#include <fxcg/display.h>
+#include <fxcg/system.h>
+#include <fxcg/rtc.h>
+#include <utilities/graphicsProvider.h>
+
+int key_down(int code) {
+    unsigned short *kreg = (unsigned short *)0xA44B0000;
+    int row = code % 10;
+    int col = code / 10 - 1;
+    int word = row >> 1;
+    int bit = col + ((row & 1) << 3);
+    return (kreg[word] & (1 << bit)) != 0;
+}
+
+int main() {
+    int x = 192;
+    int y = 108;
+    int score = 0;
+    char hud[64];
+
+    Bdisp_EnableColor(1);
+    EnableStatusArea(3); /* Весь экран 384x216 наш! */
+
+    /* Ждём, пока отпустят клавишу EXE после запуска из проводника */
+    while (key_down(31)) { OS_InnerWait_ms(10); }
+
+    while (!key_down(47)) { /* 47 = EXIT */
+        if (key_down(38)) x -= 4; /* LEFT  */
+        if (key_down(27)) x += 4; /* RIGHT */
+        if (key_down(28)) y -= 4; /* UP    */
+        if (key_down(37)) y += 4; /* DOWN  */
+        if (key_down(31)) score++; /* EXE  */
+
+        if (x < 12) x = 12;
+        if (x > 371) x = 371;
+        if (y < 30) y = 30;
+        if (y > 203) y = 203;
+
+        /* Очистка экрана тёмно-синим фоном и шапка */
+        drawRectangle(0, 0, 384, 216, 0x0008);
+        drawRectangle(0, 0, 384, 18, 0x1084);
+        sprintf(hud, "X:%d Y:%d  SCORE:%d  [EXE:+1] [EXIT:Quit]", x, y, score);
+        multiPrintMini(6, -22, hud, 0xFFFF); /* -22 + 24 = y=2px от верха */
+
+        /* Игрок */
+        drawFilledCircle(x, y, 10, 0xFFE0);
+        drawFilledCircle(x - 3, y - 3, 3, 0xFFFF);
+
+        Bdisp_PutDisp_DD();
+        OS_InnerWait_ms(15);
+    }
+
+    EnableStatusArea(0); /* Возвращаем статус-бар ОС */
+    return 0;
+}
+
+main();
+
+
+--------------------------------------------------------------------------------
+ШАБЛОН 3. Готовое системное меню + выбор числа (Menu + Selector)
+--------------------------------------------------------------------------------
+/* menu_demo.c — нативный интерфейс Utilities за пару десятков строк */
+#include <fxcg/display.h>
+#include <utilities/structInit.h>
+#include <utilities/menuGUI.h>
+#include <utilities/selectorGUI.h>
+
+struct MenuItem {
+    char *text; int type; int value; int color;
+    int isfolder; int isselected; int icon;
+};
+
+struct Menu {
+    char *statusText; char *title; char *subtitle; int titleColor;
+    char *nodatamsg; int startX; int startY; int width; int height;
+    int scrollout; int numitems; int type; int selection; int scroll;
+    int fkeypage; int numselitems; int returnOnInfiniteScrolling;
+    int returnOnLeft; int returnOnRight; int darken; int miniMiniTitle;
+    int pBaRtR; struct MenuItem *items;
+};
+
+struct Selector {
+    char *title; char *subtitle; int value; int max; int min;
+    int cycle; int type; int clearVRAM;
+};
+
+int main() {
+    struct MenuItem items[3];
+    struct Menu menu;
+    struct Selector sel;
+    int speed = 5;
+    int sound_on = 1;
+    char speed_label[32];
+    int i;
+
+    for (i = 0; i < 3; i++) initMenuItem(&items[i]);
+    initMenu(&menu);
+
+    menu.title = "My App Menu";
+    menu.numitems = 3;
+    menu.items = items;
+
+    while (1) {
+        Bdisp_AllClr_VRAM();
+        sprintf(speed_label, "Set Speed (%d)", speed);
+        items[0].text = speed_label;
+
+        items[1].text = "Sound Effect";
+        items[1].type = 1; /* 1 = MENUITEM_CHECKBOX */
+        items[1].value = sound_on;
+
+        items[2].text = "Quit";
+
+        if (doMenu(&menu, NULL) == 0) break; /* Нажали EXIT */
+
+        if (menu.selection == 1) {
+            initSelector(&sel);
+            sel.title = "Choose Speed";
+            sel.min = 1;
+            sel.max = 20;
+            sel.value = speed;
+            if (doSelector(&sel) == 1) speed = sel.value;
+        } else if (menu.selection == 2) {
+            sound_on = !sound_on;
+        } else if (menu.selection == 3) {
+            break;
+        }
+    }
+    return 0;
+}
+
+main();
+
+
+--------------------------------------------------------------------------------
+ШАБЛОН 4. Сохранение и чтение своего файла во флеш-памяти (\\fls0\)
+--------------------------------------------------------------------------------
+/* file_demo.c — создаёт \\fls0\\score.txt, пишет строку и читает обратно */
+#include <fxcg/file.h>
+
+#define CREATEMODE_FILE 1
+#define READ            0
+#define WRITE           2
+
+int main() {
+    unsigned short path16[64];
+    char *msg = "HighScore=9500\nPlayer=CASIO\n";
+    char read_buf[128];
+    int size = strlen(msg);
+    int h;
+    int n;
+
+    Bfile_StrToName_ncpy(path16, "\\\\fls0\\score.txt", 64);
+
+    /* 1. Удаляем старый файл (если был) и создаём новый нужного размера */
+    Bfile_DeleteEntry(path16);
+    if (Bfile_CreateEntry_OS(path16, CREATEMODE_FILE, &size) < 0) {
+        printf("Ошибка создания файла!\n");
+        return 1;
+    }
+
+    /* 2. Записываем данные */
+    h = Bfile_OpenFile_OS(path16, WRITE, 0);
+    if (h >= 0) {
+        Bfile_WriteFile_OS(h, msg, size);
+        Bfile_CloseFile_OS(h);
+    }
+
+    /* 3. Читаем данные обратно */
+    memset(read_buf, 0, 128);
+    h = Bfile_OpenFile_OS(path16, READ, 0);
+    if (h >= 0) {
+        n = Bfile_GetFileSize_OS(h);
+        if (n > 127) n = 127;
+        Bfile_ReadFile_OS(h, read_buf, n, 0);
+        Bfile_CloseFile_OS(h);
+        printf("Прочитано (%d байт):\n%s", n, read_buf);
+    }
+
+    return 0;
+}
+
+main();
+
+
+================================================================================
+8. ПРИЛОЖЕНИЕ: ПОЛНЫЙ РЕЕСТР ВСЕХ 43 ЗАГОЛОВКОВ И 524 ФУНКЦИЙ PICOC
+================================================================================
+
+Ниже приведены точные сигнатуры абсолютно всех функций, зарегистрированных
+в интерпретаторе PicoC внутри Utilities.g3a.
+
+ПРИМЕЧАНИЕ О 3 ВСТРОЕННЫХ ОПЕЧАТКАХ АВТОРА UTILITIES:
+  1) В <fxcg/heap.h> у sys_malloc ошибочно указаны 3 параметра — используй
+     вместо неё `void* sys_calloc(int count, int size);`.
+  2) В <utilities/homeGUI.h> и <utilities/textEditGUI.h> пропущена `;` в конце
+     пары внутренних прототипов, а в <utilities/timeProvider.h> у dateToDays
+     двойная запятая `(int,,int, int)` — если подключаешь <utilities/timeProvider.h>,
+     проверь работу на своей сборке Utilities.
+
+--------------------------------------------------------------------------------
+#include <fxcg/app.h>   (15 функций)
+--------------------------------------------------------------------------------
+  void APP_FINANCE(int, int);
+  void APP_SYSTEM_BATTERY(int);
+  void APP_SYSTEM_DISPLAY(int);
+  void APP_SYSTEM_LANGUAGE(int);
+  void APP_SYSTEM_POWER(int);
+  void APP_SYSTEM_RESET(void);
+  void APP_SYSTEM_VERSION(void);
+  void APP_SYSTEM(void);
+  void APP_RUNMAT(int, int);
+  void APP_MEMORY(void);
+  void App_Optimize(void);
+  void ResetAllDialog(void);
+  unsigned char*GetAppName(unsigned char*);
+  void App_InitDlgDescriptor(void*, unsigned char);
+  void APP_LINK_transmit_select_dialog(void*, void*);
+
+--------------------------------------------------------------------------------
+#include <fxcg/display.h>   (92 функций)
+--------------------------------------------------------------------------------
+  void Bdisp_AreaClr(struct display_fill*, unsigned char, unsigned short);
+  void Bdisp_EnableColor(int);
+  void DrawFrame(int);
+  unsigned short FrameColor(int, unsigned short);
+  void DrawFrameWorkbench(int, int, int, int, int);
+  void *GetVRAMAddress(void);
+  void Bdisp_AllClr_VRAM(void);
+  void Bdisp_SetPoint_VRAM(int, int, int);
+  void Bdisp_SetPointWB_VRAM(int, int, int);
+  unsigned short Bdisp_GetPoint_VRAM(int, int);
+  void SaveVRAM_1(void);
+  void LoadVRAM_1(void);
+  void Bdisp_Fill_VRAM(int, int);
+  void Bdisp_AreaClr_DD_x3(void*);
+  void Bdisp_DDRegisterSelect(int);
+  void Bdisp_PutDisp_DD(void);
+  void Bdisp_PutDisp_DD_stripe(int, int);
+  void Bdisp_SetPoint_DD(int, int, int);
+  unsigned short Bdisp_GetPoint_DD_Workbench(int, int);
+  unsigned short Bdisp_GetPoint_DD(int, int);
+  void DirectDrawRectangle(int, int, int, int, unsigned short);
+  void HourGlass(void);
+  void Bdisp_WriteGraphVRAM(void*);
+  void Bdisp_WriteGraphDD_WB(void*);
+  void Bdisp_ShapeBase3XVRAM(void*);
+  void Bdisp_ShapeBase(unsigned char*, void*, int, int, int, int);
+  void Bdisp_ShapeToVRAM16C(void*, int);
+  void Bdisp_ShapeToDD(void*, int);
+  void SetBackGround(int);
+  void WriteBackground(void*, int, int, void*, int, int, int);
+  void Box(int, int, int, int, int);
+  void BoxInnerClear(int);
+  void Box2(int, int);
+  void BoxYLimits(int, int*, int*);
+  void AUX_DisplayErrorMessage(int);
+  void MsgBoxPush(int);
+  void MsgBoxPop(void);
+  void DisplayMessageBox(unsigned char*);
+  short CharacterSelectDialog(void);
+  unsigned char ColorIndexDialog1(unsigned char, unsigned short);
+  void MsgBoxMoveWB(void*, int, int, int, int, int);
+  void locate_OS(int, int);
+  void Cursor_SetFlashOn(unsigned char);
+  void Cursor_SetFlashOff(void);
+  int SetCursorFlashToggle(int);
+  void Keyboard_CursorFlash(void);
+  void PrintLine(char*, int);
+  void PrintLine2(int, int, char*, int, int, int, int, int);
+  void PrintXY_2(int, int, int, int, int);
+  void PrintXY(int, int, char*, int, int);
+  void PrintCXY(int, int, char*, int, int, int, int, int, int);
+  void PrintGlyph(int, int, unsigned char*, int, int, int, int);
+  void*GetMiniGlyphPtr(unsigned short, unsigned short*);
+  void PrintMiniGlyph(int, int, void*, int, int, int, int, int, int, int, int, int);
+  void PrintMini(int*, int*, char*, int, unsigned int, int, int, int, int, int, int);
+  void PrintMiniMini(int*, int*, char*, int, char, int);
+  void Print_OS(char*, int, int);
+  void Bdisp_WriteSystemMessage(int, int, int, int, char);
+  void Bdisp_MMPrintRef(int*, int*, unsigned char*, int, int, int, int, int, int, int, int);
+  void Bdisp_MMPrint(int, int, unsigned char*, int, int, int, int, int, int, int, int);
+  void Scrollbar(struct scrollbar*);
+  void StandardScrollbar(void*);
+  void ProgressBar(int, int);
+  void ProgressBar0(int, int, int, int, int);
+  void ProgressBar2(unsigned char*, int, int);
+  int DefineStatusAreaFlags(int, int, void*, void*);
+  void DefineStatusGlyph(int, void*);
+  void DefineStatusMessage(char*, short, char, char);
+  void DisplayStatusArea(void);
+  void DrawHeaderLine(void);
+  void EnableStatusArea(int);
+  void Bdisp_HeaderFill(unsigned char, unsigned char);
+  void Bdisp_HeaderFill2(unsigned int, unsigned int, unsigned char, unsigned char);
+  void Bdisp_HeaderText(void);
+  void Bdisp_HeaderText2(void);
+  void EnableDisplayHeader(int, int);
+  void APP_EACT_StatusIcon(int);
+  void SetupMode_StatusIcon(void);
+  void d_c_Icon(unsigned int);
+  void BatteryIcon(unsigned int);
+  void KeyboardIcon(unsigned int);
+  void LineIcon(unsigned int);
+  void NormIcon(unsigned int);
+  void RadIcon(unsigned int);
+  void RealIcon(unsigned int);
+  void FKey_Display(int, void*);
+  void GetFKeyPtr(int, void*);
+  void DispInt(int, int);
+  int LocalizeMessage1(int, char*);
+  int SMEM_MapIconToExt(unsigned char*, unsigned short*, unsigned int*, unsigned short*);
+  void VRAM_CopySprite(unsigned short*, int, int, int, int);
+  void VRAM_XORSprite(unsigned short*, int, int, int, unsigned int);
+
+--------------------------------------------------------------------------------
+#include <fxcg/file.h>   (36 функций)
+--------------------------------------------------------------------------------
+  int Bfile_CloseFile_OS(int);
+  int Bfile_CreateEntry_OS(unsigned short*, int, int*);
+  int Bfile_DeleteEntry(unsigned short*);
+  int Bfile_RenameEntry(unsigned short*, unsigned short*);
+  int Bfile_FindClose(int);
+  int Bfile_FindFirst(char*, int*, char*, void*);
+  int Bfile_FindFirst_NON_SMEM(char*, int*, char*, void*);
+  int Bfile_FindNext(int, char*, char*);
+  int Bfile_FindNext_NON_SMEM(int, char*, char*);
+  int Bfile_GetFileSize_OS(int);
+  int Bfile_OpenFile_OS(unsigned short*, int, int);
+  int Bfile_ReadFile_OS(int, void*, int, int);
+  int Bfile_SeekFile_OS(int, int);
+  int Bfile_TellFile_OS(int);
+  int Bfile_WriteFile_OS(int, void*, int);
+  void Bfile_NameToStr_ncpy(char*, unsigned short*, unsigned int);
+  void Bfile_StrToName_ncpy(unsigned short*, char*, unsigned int);
+  int Bfile_Name_MatchMask(short*, short*);
+  int Bfile_GetMediaFree_OS(unsigned short*, int*);
+  int SMEM_FindFirst(unsigned short*, unsigned short*);
+  int MCS_CreateDirectory(unsigned char*);
+  int MCS_DeleteDirectory(unsigned char*);
+  int MCSDelVar2(unsigned char*, unsigned char*);
+  int MCS_GetCapa(int*);
+  int MCSGetData1(int, int, void*);
+  int MCSGetDlen2(unsigned char*, unsigned char*, int*);
+  int MCS_GetMainMemoryStart(void);
+  int MCSGetOpenItem(unsigned char*);
+  int MCSOvwDat2(unsigned char*, unsigned char*, int, void*, int);
+  int MCSPutVar2(unsigned char*, unsigned char*, int, void*);
+  int MCS_WriteItem(unsigned char*, unsigned char*, short, int, int);
+  int MCS_GetState(int*, int*, int*);
+  int SaveFileDialog(unsigned short*, int);
+  int OverwriteConfirmation(char*, int);
+  int OpenFileDialog(unsigned short, unsigned short*, int);
+  int ConfirmFileOverwriteDialog(unsigned short*);
+
+--------------------------------------------------------------------------------
+#include <fxcg/heap.h>   (4 функций)
+--------------------------------------------------------------------------------
+  void*sys_calloc(int, int);
+  void*sys_malloc(unsigned short*, int, int*);
+  void*sys_realloc(void*, int);
+  void sys_free(void*);
+
+--------------------------------------------------------------------------------
+#include <fxcg/keyboard.h>   (20 функций)
+--------------------------------------------------------------------------------
+  void Set_FKeys2(unsigned int);
+  void Set_FKeys1(unsigned int, unsigned int*);
+  void PRGM_GetKey_OS(unsigned char*);
+  int GetKey(int*);
+  int GetKeyWait_OS(int*, int*, int, int, int, unsigned short*);
+  int PRGM_GetKey();
+  void DisplayMBString(unsigned char*, int, int, int, int);
+  void DisplayMBString2(int, unsigned char*, int, int, int, int, int, int, int);
+  void EditMBStringCtrl(unsigned char*, int, int*, int*, int*, int, int);
+  void EditMBStringCtrl2(unsigned char*, int, int*, int*, int*, int, int, int, int);
+  void EditMBStringCtrl3(unsigned char*, int, void*, void*, void*, int, int, int, int, int);
+  void EditMBStringCtrl4(unsigned char*, int, void*, void*, void*, int, int, int, int, int, int);
+  int EditMBStringChar(unsigned char*, int, int, int);
+  void Bkey_ClrAllFlags(void);
+  void Bkey_SetFlag(short);
+  int Keyboard_PutKeycode(int, int, int);
+  int Keyboard_SpyMatrixCode(char*, char*);
+  void Bkey_SetAllFlags(short);
+  short Bkey_GetAllFlags(void);
+  int GetGetkeyToMainFunctionReturnFlag(void);
+
+--------------------------------------------------------------------------------
+#include <fxcg/misc.h>   (10 функций)
+--------------------------------------------------------------------------------
+  int ItoA_10digit(int, void*);
+  void ByteToHex(unsigned char, unsigned char*);
+  void HexToByte(unsigned char*, unsigned char*);
+  void HexToNibble(unsigned char, unsigned char*);
+  void HexToWord(unsigned char*, unsigned short*);
+  void itoa(int, unsigned char*);
+  void LongToAscHex(int, unsigned char*, int);
+  void NibbleToHex(unsigned char, unsigned char*);
+  void WordToHex(unsigned short, unsigned char*);
+  int BCDtoInternal(void*, void*);
+
+--------------------------------------------------------------------------------
+#include <fxcg/rtc.h>   (5 функций)
+--------------------------------------------------------------------------------
+  int RTC_Reset(int);
+  void RTC_SetDateTime(unsigned char*);
+  void RTC_GetTime(unsigned int*, unsigned int*, unsigned int*, unsigned int*);
+  int RTC_GetTicks(void);
+  int RTC_Elapsed_ms(int, int);
+
+--------------------------------------------------------------------------------
+#include <fxcg/serial.h>   (23 функций)
+--------------------------------------------------------------------------------
+  int Serial_Open(unsigned char*);
+  int Serial_IsOpen(void);
+  int Serial_Close(int mode);
+  int Serial_Read(unsigned char*, int, short*);
+  int Serial_ReadSingle(unsigned char*);
+  int Serial_Peek(int, unsigned char*);
+  int Serial_PollRX(void);
+  int Serial_ClearRX(void);
+  int Serial_Write(unsigned char*, int);
+  int Serial_WriteSingle(unsigned char);
+  int Serial_PollTX(void);
+  int Serial_ClearTX(void);
+  int App_LINK_GetReceiveTimeout_ms(void);
+  void App_LINK_SetReceiveTimeout_ms(int);
+  int Comm_Open(unsigned short);
+  int Comm_Close(int);
+  int Comm_TryCheckPacket(unsigned char);
+  int Comm_Terminate(unsigned char);
+  int App_LINK_SetRemoteBaud(void);
+  int App_LINK_Send_ST9_Packet(void);
+  int App_LINK_GetDeviceInfo(unsigned int*, unsigned int*);
+  int App_LINK_TransmitInit(void*);
+  int App_LINK_Transmit(void*);
+
+--------------------------------------------------------------------------------
+#include <fxcg/system.h>   (25 функций)
+--------------------------------------------------------------------------------
+  void SetAutoPowerOffTime(int);
+  int GetAutoPowerOffTime();
+  void SetBacklightDuration(char);
+  char GetBacklightDuration();
+  void SetBatteryType(int);
+  int GetBatteryType(void);
+  int GetMainBatteryVoltage(int);
+  void PowerOff(int);
+  void Restart(void);
+  void SpecialMatrixcodeProcessing(int*, int*);
+  void TestMode(int);
+  void*GetStackPtr(void);
+  void SetSetupSetting(unsigned int, unsigned char);
+  unsigned char GetSetupSetting(unsigned int);
+  void TakeScreenshot(void);
+  void TakeScreenshot2(void);
+  void DisplayMainMenu(void);
+  void OS_InnerWait_ms(int);
+  void CMT_Delay_100micros(int);
+  void CMT_Delay_micros(int);
+  void Alpha_SetData(char, void*);
+  void Alpha_GetData(char, void*);
+  int CLIP_Store(unsigned char*, int);
+  int MB_ElementCount(char* buf);
+  int GlibGetOSVersionInfo(char*, char*, short*, short*);
+
+--------------------------------------------------------------------------------
+#include <utilities/aboutGUI.h>   (2 функций)
+--------------------------------------------------------------------------------
+  void aboutScreen(void);
+  void buildExpiredScreen(void);
+
+--------------------------------------------------------------------------------
+#include <utilities/calendarGUI.h>   (26 функций)
+--------------------------------------------------------------------------------
+  void viewCalendar(int);
+  int viewMonthCalendar(int);
+  int viewWeekCalendar();
+  int viewWeekCalendarChild(void*, int*, int*, int*, int*, int*);
+  void viewEvents(int, int, int);
+  void viewEvent(void*);
+  int viewEventsChild(void*, int, int, int);
+  void fillInputDate(void*, char*);
+  void fillInputTime(void*, char*);
+  int eventEditor(int, int, int, int, void*, int);
+  void drawCalendar(int, int, int, int, int*, int*, int*, int*);
+  int moveEventScreen(void*, int, int, int);
+  int deleteEventPrompt(void*, int, int, int);
+  int deleteAllEventsPrompt(int, int, int, int);
+  int selectDateScreen(int*, int*, int*, char*, char*, int);
+  void invalidFieldMsg(int);
+  void setReminderScreen(void*);
+  int setCategoryPrompt(void*);
+  void viewEventAtPos(void*, int);
+  void searchEventsScreen(int, int, int);
+  void drawBusymapDay(void*, int, int, int, int, int, int, int);
+  void drawBusymapWeek(int, int, int, int, int, int, int);
+  void calendarToolsMenu(int, int, int);
+  void databaseRepairScreen(void);
+  void databaseTrimScreen(void);
+  void eventImportScreen(void);
+
+--------------------------------------------------------------------------------
+#include <utilities/calendarProvider.h>   (15 функций)
+--------------------------------------------------------------------------------
+  char* eventToString(void*, char*);
+  void stringToEvent(char*, void*);
+  void stringToSimpleEvent(char*, void*);
+  void eventDateToFilename(void*, unsigned short*, char*);
+  int addEvent(void*, char*, int);
+  int replaceEventFile(void*, void*, char*, int);
+  void removeEvent(void*, void*, char*, int, int);
+  void removeDay(void*, char*);
+  int getEvents(void*, char*, void*, int, void*);
+  void getEventCountsForMonth(int, int, int*, int*);
+  int searchEventsOnDay(void*, char*, void*, char*, int);
+  int searchEventsOnYearOrMonth(int, int, char*, void*, char*, int);
+  void repairEventFile(char*, char*, int*, int*);
+  void setDBcorruptFlag(int);
+  int getDBcorruptFlag(void);
+
+--------------------------------------------------------------------------------
+#include <utilities/chronoGUI.h>   (10 функций)
+--------------------------------------------------------------------------------
+  void formatChronoString(void*, int, unsigned char*, int);
+  void stopAndUninstallStubTimer();
+  void chronoScreen();
+  void startSelectedChronos(void*, void*, int);
+  void stopSelectedChronos(void*, void*, int);
+  void clearSelectedChronos(void*, void*, int);
+  void setChronoScreen(void*, void*, int);
+  void setPresetChrono(void*, void*);
+  int getLastCompleteChrono(void);
+  void checkChronoComplete(void*);
+
+--------------------------------------------------------------------------------
+#include <utilities/chronoProvider.h>   (8 функций)
+--------------------------------------------------------------------------------
+  void saveChronoArray(void*, int);
+  void loadChronoArray(void*, int);
+  void setChrono(void*, int, int, int, int);
+  void stopChrono(void*);
+  void startChrono(void*);
+  void clearChrono(void*);
+  void* getChronoArrayPtr();
+  void setChronoArrayPtr(void*);
+
+--------------------------------------------------------------------------------
+#include <utilities/editorGUI.h>   (1 функций)
+--------------------------------------------------------------------------------
+  void textfileEditor(char*, char*);
+
+--------------------------------------------------------------------------------
+#include <utilities/fileGUI.h>   (17 функций)
+--------------------------------------------------------------------------------
+  void fileManager(void);
+  void getFileManagerStatus(char*, int, int);
+  int fileManagerChild(char*, int*, int*, int*, void*, char*);
+  int deleteFilesPrompt(void*, void*);
+  int newFolderScreen(char*);
+  int newG3Pscreen(char*);
+  int renameFileScreen(void*, void*, char*);
+  int searchFilesScreen(char*, char*, int);
+  int viewFileInfo(void*, int, int, int);
+  void viewFileAsText(char*);
+  void viewClipboard(void*, int*);
+  void folderStatsScreen(void*, void*);
+  void compressSelectedFiles(void*, void*);
+  void decompressSelectedFiles(void*, void*);
+  void shortenDisplayPath(char*, char*, int);
+  void buildIconTable(void*);
+  int overwriteFilePrompt(char*);
+
+--------------------------------------------------------------------------------
+#include <utilities/fileProvider.h>   (15 функций)
+--------------------------------------------------------------------------------
+  void sortFiles(void*, int);
+  int getFiles(void*, char*, int*);
+  int searchForFiles(void*, char*, char*, int, int, int, int, int*, int);
+  void deleteFiles(void*, void*);
+  void renameFile(char*, char*);
+  char* filenameToName(char*);
+  void copyFile(char*, char*);
+  void pasteClipboard(void*, char*, int);
+  int filenameToIcon(char*);
+  int stringEndsInG3A(char*);
+  int stringEndsInJPG(char*);
+  void createFolderRecursive(char*);
+  void compressFile(char*, char*, int, int);
+  int isFileCompressed(char*, int*);
+  int fileOpen(char*);
+
+--------------------------------------------------------------------------------
+#include <utilities/firstRunGUI.h>   (1 функций)
+--------------------------------------------------------------------------------
+  void firstRunWizard(void);
+
+--------------------------------------------------------------------------------
+#include <utilities/graphicsProvider.h>   (28 функций)
+--------------------------------------------------------------------------------
+  void drawRectangle(int, int, int, int, unsigned short);
+  void drawLine(int, int, int, int, int);
+  void drawFilledCircle(int, int, int, unsigned short);
+  void drawCircularCountdownIndicator(int, int, int, unsigned short, unsigned short, int, int);
+  void replaceColorInArea(int, int, int, int, unsigned short, unsigned short);
+  void invertArea(short, short, short, short);
+  void darkenStatusbar(void);
+  void darkenFkeys(int);
+  void drawArrowDown(int, int, int);
+  void drawFkeyPopup(int, char*);
+  void CopySpriteMasked(unsigned short*, int, int, int, int, unsigned short);
+  void CopySpriteNbitMasked(unsigned char*, int, int, int, int, unsigned short*, unsigned short, unsigned int);
+  void drawSegvaultLogo(int, int);
+  int textColorToFullColor(int);
+  void progressMessage(char*, int, int);
+  void closeProgressMessage(void);
+  void printCentered(char*, int, int, int);
+  void clearLine(int, int, unsigned short);
+  void mPrintXY(int, int, char*, int, int);
+  void multiPrintXY(int, int, char*, int, int);
+  void multiPrintMini(int, int, char*, int);
+  void mMsgBoxPush(int);
+  void mMsgBoxPop(void);
+  void popAllMsgBoxes(void);
+  int getMsgBoxCount(void);
+  void drawScreenTitle(char*, char*);
+  void drawFkeyLabels(int, int, int, int, int, int);
+  int drawRGB24toRGB565(int, int, int);
+
+--------------------------------------------------------------------------------
+#include <utilities/hardwareProvider.h>   (7 функций)
+--------------------------------------------------------------------------------
+  void CPU_change_freq(int);
+  int getRawBacklightSubLevel(void);
+  void setRawBacklightSubLevel(int);
+  void getHardwareID(char*);
+  int getHardwareModel(void);
+  int getIsEmulated(void);
+  void setBrightnessToStartupSetting(void);
+
+--------------------------------------------------------------------------------
+#include <utilities/homeGUI.h>   (10 функций)
+--------------------------------------------------------------------------------
+  void homeScreen(int);
+  void powerMenu(int*);
+  void lightMenu(int*);
+  void timeMenu(int*);
+  void memsysMenu(int*);
+  void toolsMenu(int*);
+  void handleHomePane(int, int*)
+  void paneHandleBasicKeys(int, int*)
+  void eventsPane(int, int*);
+  void memoryUsagePane(int, int*);
+
+--------------------------------------------------------------------------------
+#include <utilities/imageGUI.h>   (1 функций)
+--------------------------------------------------------------------------------
+  void viewImage(char*);
+
+--------------------------------------------------------------------------------
+#include <utilities/inputGUI.h>   (1 функций)
+--------------------------------------------------------------------------------
+  int doTextInput(void*);
+
+--------------------------------------------------------------------------------
+#include <utilities/keyboardProvider.h>   (4 функций)
+--------------------------------------------------------------------------------
+  void saveVRAMandCallSettings(void);
+  void mGetKey(int*, int);
+  void setmGetKeyMode(int);
+  unsigned int SetGetkeyToMainFunctionReturnFlag(unsigned int);
+
+--------------------------------------------------------------------------------
+#include <utilities/lightGUI.h>   (4 функций)
+--------------------------------------------------------------------------------
+  void lantern(void);
+  void flashLight(int);
+  void morseLight(void);
+  void colorLight(void);
+
+--------------------------------------------------------------------------------
+#include <utilities/lockGUI.h>   (6 функций)
+--------------------------------------------------------------------------------
+  int passwordInput(int, int, unsigned char*);
+  int setPassword();
+  int unlockCalc();
+  void lockApp();
+  void openRunMat();
+  void returnToUtilitiesHandler();
+
+--------------------------------------------------------------------------------
+#include <utilities/lockProvider.h>   (4 функций)
+--------------------------------------------------------------------------------
+  void hashPassword(unsigned char*, unsigned char*);
+  int comparePasswordHash(unsigned char*);
+  int savePassword(unsigned char*);
+  int isPasswordSet(void);
+
+--------------------------------------------------------------------------------
+#include <utilities/memsysGUI.h>   (7 функций)
+--------------------------------------------------------------------------------
+  void memoryCapacityScreen(int);
+  int getAddins(void*);
+  void addinManager(void);
+  int addinManagerChild(void*);
+  void changeFKeyColor(void);
+  void systemInfo(void);
+  void userInfo(void);
+
+--------------------------------------------------------------------------------
+#include <utilities/menuGUI.h>   (3 функций)
+--------------------------------------------------------------------------------
+  int doMenu(void*, void*);
+  int getMenuSelectionSeparators(void*, int*, int*);
+  int closeMsgBox(int, int);
+
+--------------------------------------------------------------------------------
+#include <utilities/powerGUI.h>   (5 функций)
+--------------------------------------------------------------------------------
+  void setPoweroffTimeout(void);
+  void setBacklightTimeout(void);
+  void setBacklightLevel(void);
+  void powerInformation(void);
+  int getPLLinfo(unsigned int, char**, char**, int*);
+
+--------------------------------------------------------------------------------
+#include <utilities/selectorGUI.h>   (1 функций)
+--------------------------------------------------------------------------------
+  int doSelector(void*);
+
+--------------------------------------------------------------------------------
+#include <utilities/settingsGUI.h>   (2 функций)
+--------------------------------------------------------------------------------
+  void settingsMenu(void);
+  void calendarSettingsMenu(void);
+
+--------------------------------------------------------------------------------
+#include <utilities/settingsProvider.h>   (4 функций)
+--------------------------------------------------------------------------------
+  unsigned char getSetting(int);
+  void setSetting(int, unsigned char, int);
+  int loadSettings();
+  void saveSettings();
+
+--------------------------------------------------------------------------------
+#include <utilities/stringsProvider.h>   (9 функций)
+--------------------------------------------------------------------------------
+  int isMBfirst(char);
+  char *toksplit(char*, char, char*, int);
+  int strEndsWith(char*, char*);
+  void* memmem(char*, int, char*, int, int);
+  int strncpy_retlen(char*, char*, int);
+  char* strncpy_replace(char*, char*, int, char, char);
+  void stringToMini(char*, char*);
+  int base32_decode(unsigned char*, unsigned char*, int);
+  int base32_validate(char*);
+
+--------------------------------------------------------------------------------
+#include <utilities/tasksGUI.h>   (2 функций)
+--------------------------------------------------------------------------------
+  void viewTasks(void);
+  int viewTasksChild(void*);
+
+--------------------------------------------------------------------------------
+#include <utilities/textGUI.h>   (1 функций)
+--------------------------------------------------------------------------------
+  int doTextArea(void*);
+
+--------------------------------------------------------------------------------
+#include <utilities/textEditGUI.h>   (1 функций)
+--------------------------------------------------------------------------------
+  int doTextEdit(void*)
+
+--------------------------------------------------------------------------------
+#include <utilities/timeGUI.h>   (9 функций)
+--------------------------------------------------------------------------------
+  void drawLongDate(int, int, int, int, int);
+  void drawAnalogClock(int, int, int, int, int);
+  void drawAnalogChronometer(int, int, int, int, int, int, int, int, int);
+  void RTCunadjustedWizard(int);
+  void setTimeScreen(int);
+  void setDateScreen(int);
+  void currentTimeToBasicVar(void);
+  void drawHomeClock(int, int);
+  void setTimezone(void);
+
+--------------------------------------------------------------------------------
+#include <utilities/timeProvider.h>   (33 функций)
+--------------------------------------------------------------------------------
+  int getMonthDays(int);
+  int getMonthDaysWithLeap(int, int);
+  char* getCurrentDOWAsString();
+  char* getCurrentDOWAsShortString();
+  char* getCurrentMonthAsString();
+  char* getDOWAsString(int);
+  char* getDOWAsShortString(int);
+  char* getMonthAsString(int);
+  int isLeap(int);
+  int dow(int, int, int);
+  int getDayOfYear(int, int, int);
+  int getWeekNumber(int, int, int);
+  int getCurrentYear();
+  int getCurrentMonth();
+  int getCurrentDay();
+  int getCurrentHour();
+  int getCurrentMinute();
+  int getCurrentSecond();
+  int getCurrentMillisecond();
+  void dateTimeToUEBT(int*, int*, int, int, int, int, int, int, int);
+  void setTime(int, int, int);
+  void setDate(int, int, int);
+  void blockForTicks(int);
+  void blockForMilliseconds(int);
+  int tickDifferenceToMilliseconds(int, int);
+  int isTimeValid(int, int, int);
+  int isDateValid(int, int, int);
+  void daysToDate(int, int*, int*, int*);
+  int dateToDays(int,,int, int);
+  void stringToDate(char*, int*, int*, int*, int);
+  void stringToTime(char*, int*, int*, int*);
+  char* getInputDateFormatHint(int);
+  int isDSTchangeToday();
+
+--------------------------------------------------------------------------------
+#include <utilities/toolsGUI.h>   (15 функций)
+--------------------------------------------------------------------------------
+  void balanceManager(void);
+  int balanceManagerChild(void*, char*);
+  int addTransactionWizard(char*);
+  int deleteTransactionPrompt(void*, char*, int, int);
+  void viewTransaction(void*);
+  int createWalletWizard(int);
+  int changeWalletScreen(char*);
+  int deleteWalletPrompt(char*);
+  int renameWalletScreen(char*, char*);
+  void passwordGenerator(void);
+  void totpClient(void);
+  void viewTOTPcode(void*);
+  int addTOTPwizard(void);
+  int renameTOTPscreen(int, char*);
+  int deleteTOTPprompt(int);
+
+--------------------------------------------------------------------------------
+#include <utilities/toolsProvider.h>   (22 функций)
+--------------------------------------------------------------------------------
+  void currencyToString(char*, void*);
+  int stringToCurrency(void*, char*);
+  void addCurrency(void*, void*);
+  void subtractCurrency(void*, void*);
+  void walletNameToPath(char*, char*);
+  void getWalletBalance(void*, char*);
+  int getCurrentWallet(char*);
+  void setCurrentWallet(char*);
+  void transactionToCalendarEvent(void*, void*);
+  void calendarEventToTransaction(void*, void*);
+  int getWalletTransactions(char*, void*, int);
+  void addTransaction(void*, char*);
+  void replaceWalletTransactions(void*, char*, int);
+  void deleteTransaction(void*, char*, int, int);
+  void createWallet(char*, void*);
+  void deleteWallet(char*);
+  void generateRandomString(char*, int, int, int, int, int, int, int*);
+  unsigned int computeTOTP(void*);
+  int loadTOTPs(void*);
+  void addTOTP(char*, char*);
+  void removeTOTP(int);
+  void renameTOTP(int, char*);
+
+--------------------------------------------------------------------------------
+#include <utilities/versionProvider.h>   (3 функций)
+--------------------------------------------------------------------------------
+  char* getVersion();
+  char* getTimestamp();
+  int isBuildExpired();
+
+--------------------------------------------------------------------------------
+#include <utilities/structInit.h>   (17 функций)
+--------------------------------------------------------------------------------
+  void initEventDate(void*);
+  void initEventTime(void*);
+  void initCalendarEvent(void*);
+  void initSimpleCalendarEvent(void*);
+  void initChronometer(void*);
+  void initFile(void*);
+  void initTextInput(void*);
+  void initAddIn(void*);
+  void initMenu(void*);
+  void initMenuItem(void*);
+  void initSelector(void*);
+  void initTextElement(void*);
+  void initTextArea(void*);
+  void initTextEdit(void*);
+  void initCurrency(void*);
+  void initTransaction(void*);
+  void initTOTP(void*);
+
+================================================================================
+ИТОГО: 43 заголовочных файлов, 524 библиотечных функций + 20 встроенных = 544.
+================================================================================
