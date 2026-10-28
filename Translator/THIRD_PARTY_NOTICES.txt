@@ -1,0 +1,36 @@
+Third-party notices for Translator for Casio fx-CG50
+===================================================
+
+The application's own code is MIT-licensed (LICENSE). Third-party components
+and dictionary data keep their own notices and terms:
+
+* FreeDict/WikDict/Wiktionary bilingual dictionary data: see
+  LICENSE_DATA.txt in the installation archive (or dicts/LICENSE_data.txt
+  in the source directory). The original TEI headers specify CC BY-SA 3.0;
+  this adaptation is offered under CC BY-SA 4.0. See that notice for source
+  URLs, attribution and the upstream license-version/provenance caveat.
+* DejaVu Sans Mono: bitmap glyphs rendered into the add-in; the complete
+  upstream font license is reproduced in licenses/DejaVu_fonts.txt.
+  https://dejavu-fonts.github.io/
+* miniz 2.2.0 tinfl decompressor: MIT notice and original copyright
+  reproduced verbatim in licenses/miniz_MIT.txt. The upstream sources also
+  carry the Unlicense text in src/miniz.c.
+  https://github.com/richgel999/miniz/tree/2.2.0
+* libfxcg: BSD 3-Clause license, reproduced in licenses/libfxcg_BSD.txt.
+  https://github.com/Jonimoose/libfxcg
+* fxSDK/fxgxa: used to verify the G3A checksum routine and binary format;
+  MIT license reproduced in licenses/fxSDK_MIT.txt.
+  https://gitea.planet-casio.com/Lephenixnoir/fxsdk
+* mkg3a: build-time packager, zlib license reproduced in
+  licenses/mkg3a_zlib.txt. https://gitlab.com/taricorp/mkg3a
+* GCC libgcc: SuperH helper code from GCC 12.4.0, GPLv3 with the GCC Runtime
+  Library Exception 3.1. The exception text is reproduced in
+  licenses/GCC_runtime_exception.txt; full GPL text and corresponding source:
+  https://www.gnu.org/licenses/gpl-3.0.html
+  https://ftp.gnu.org/gnu/gcc/gcc-12.4.0/gcc-12.4.0.tar.xz
+* The clean OS menu transition reuses the project's PyCEdit/Wireworld path.
+  Hardware/syscall documentation attribution: Dr-Carlos and Lephenixnoir
+  (syscall 0x1E58), Simon Lothar and gbl08ma (syscall 0x1E99).
+
+CASIO and fx-CG50 are trademarks of CASIO COMPUTER CO., LTD. This independent
+project is not affiliated with or endorsed by CASIO. No CASIO ROM is bundled.

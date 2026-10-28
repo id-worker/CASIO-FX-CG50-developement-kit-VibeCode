@@ -1,10 +1,10 @@
 # Third-Party Licenses & Community Attributions
 
-The source code of **ObjView**, **PyCEdit**, **Wireworld**, **obj_viewer.py**, **win_gint**, and the documentation in `docs/` are original works licensed under the **MIT License** (see [`LICENSE`](LICENSE)).
+Original portions of **ObjView**, **PyCEdit**, **Wireworld**, **obj_viewer.py**, **win_gint**, and the documentation in `docs/` are offered under the **MIT License** (see [`LICENSE`](LICENSE)). Third-party code, libraries and assets retain their own terms; the `set_menu_return_flag()` implementation and the exact source of one sample mesh require additional review (see sections 5 and 6).
 
-> Two related projects ship in **companion repositories** under their own upstream licenses: **Utilities** (modified fork of `gbl08ma/utilities`, GNU GPL v2 → repo `utilities-cg50`) and **PythonExtra** (prebuilt MIT binaries of PythonExtra + MicroPython → repo `PythonExtra-cg50`). Their notices travel with those repositories.
+> Two related projects ship in **companion repositories** under their own upstream licenses: **Utilities** (modified fork of `gbl08ma/utilities`, GNU GPL v2 → repo [`Utilities`](https://github.com/id-worker/Utilities)) and **PythonExtra** (prebuilt MIT binaries of PythonExtra + MicroPython → repo [`PythonExtra-4.0-beta-FX-CG50`](https://github.com/id-worker/PythonExtra-4.0-beta-FX-CG50)). Their notices travel with those repositories.
 
-Prebuilt `.g3a` add-in binaries in this repository statically link against open-source Casio Prizm / fx-CG50 libraries and toolchains listed below. Their copyright notices and license terms are reproduced here in full compliance with their respective licenses.
+Prebuilt `.g3a` add-in binaries in this repository statically link against open-source Casio Prizm / fx-CG50 libraries and toolchains listed below. Identified notices and license terms are recorded below; see the unresolved review items before further redistribution.
 
 > **Trademark Disclaimer:** CASIO, PRIZM, and fx-CG50 are trademarks or registered trademarks of CASIO COMPUTER CO., LTD. This repository is an independent, unofficial community project and is neither affiliated with nor endorsed by CASIO. No proprietary CASIO SDK or ROM code is included.
 
@@ -150,11 +150,22 @@ Compiled SuperH (`sh3eb-elf` / `sh-elf`) binaries link minimal integer helper ro
 
 ---
 
+### Pending: menu-return implementation
+
+`set_menu_return_flag()` in the existing PyCEdit/Wireworld code resembles the
+published routine by Simon Lothar and code in GPL Utilities. Attribution alone
+is not permission to license a particular implementation under MIT. Confirm
+permission / provenance, or independently replace and test it, before further
+redistribution. The corresponding concern for Translator is documented in its
+own `PUBLICATION_REVIEW_RU.md`.
+
+---
+
 ## 6. Sample 3D Meshes (`ObjView/models/`)
 
-All bundled sample `.obj` files in `ObjView/models/` are in the **Public Domain / CC0**:
+Status of the bundled `.obj` files in `ObjView/models/`:
 - `torus.obj` — Procedurally generated mathematical torus mesh (**CC0 1.0 Public Domain**).
 - `spot.obj` — *"Spot"* cow mesh by **Keenan Crane** (Carnegie Mellon University), released into the **Public Domain (CC0)** (<https://www.cs.cmu.edu/~kmcrane/Projects/ModelRepository/>).
-- `teapot.obj` — Classic **Utah Teapot** dataset by **Martin Newell** (1975, University of Utah), **Public Domain**.
+- `teapot.obj` — Classic **Utah Teapot** dataset by **Martin Newell** (1975, University of Utah). The exact provenance and CC0/public-domain status of this particular triangulated file have not been established. Utah Graphics Lab states that its Utah Teapot files are freely available for any use and requests preserving the name/origin: <https://graphics.cs.utah.edu/teapot/>. This is not, by itself, proof that this particular file is CC0. Review its source or replace it with an individually verified CC0 model before claiming that all bundled models are CC0.
 
 ---

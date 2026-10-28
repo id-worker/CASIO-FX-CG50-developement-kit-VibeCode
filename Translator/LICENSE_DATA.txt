@@ -1,0 +1,52 @@
+Dictionary data: FreeDict + WikDict + Wiktionary
+================================================
+
+TDIC.DAT is an adaptation of both of these dictionaries, edition 2025.11.23,
+maintained/published by Karl Bartel and distributed by FreeDict:
+
+English-Russian FreeDict+WikDict dictionary:
+https://download.freedict.org/dictionaries/eng-rus/2025.11.23/freedict-eng-rus-2025.11.23.src.tar.xz
+SHA-512: fdee5ebdbe59c2a4293b875def3befdfddd990f95ecd10eb289eff22d815ed6d31267ca4695af66811ef368dd72b16342210475e044c995831e7931ce0e4bcfe
+
+Russian-English FreeDict+WikDict dictionary:
+https://download.freedict.org/dictionaries/rus-eng/2025.11.23/freedict-rus-eng-2025.11.23.src.tar.xz
+SHA-512: 9adf7a5eda27ccfa3e496b86b2fd575fc0e4af7ac5626a219d44e4ebfd56280deaf67cefd995ab04e9d7ef415e88f8cf0f9cae3252da6221376fd6d0c39012ba
+
+Source credit: WikDict (Karl Bartel), with base data from Wiktionary
+contributors via DBnary (Gilles Serasset). Source project pages:
+  https://freedict.org/   https://www.wikdict.com/
+  https://www.wiktionary.org/   http://kaiko.getalp.org/about-dbnary/
+
+Both downloaded TEI headers state the following original license:
+Creative Commons Attribution-ShareAlike 3.0 Unported (CC BY-SA 3.0):
+  https://creativecommons.org/licenses/by-sa/3.0/legalcode
+  (text included as licenses/CC_BY_SA_3.0.txt)
+Keep that original attribution and license notice with the source data.
+
+Changes in TDIC.DAT: converted TEI to a compact binary format with lossless
+block compression; merged matching headwords and parts of speech; removed
+markup/stress marks; shortened some entries; added some reverse lookup keys
+from English-Russian translations and е/ё spelling variants. The unmodified
+source archives remain available at the URLs above. The conversion script
+is tools/make_dict.py in the source project.
+
+Our adaptation of this data is offered under Creative Commons
+Attribution-ShareAlike 4.0 International (CC BY-SA 4.0):
+  https://creativecommons.org/licenses/by-sa/4.0/legalcode
+  (text included as licenses/CC_BY_SA_4.0.txt)
+
+UPSTREAM PROVENANCE NOTE: the original 2025.11.23 FreeDict TEI files state
+CC BY-SA 3.0, but Wiktionary's current terms state CC BY-SA 4.0 and new
+Wikimedia text contributions have defaulted to 4.0 since 2023:
+  https://en.wiktionary.org/wiki/Wiktionary:Copyrights
+  https://creativecommons.org/2023/06/29/wikipedia-moves-to-cc-4-0-licenses/
+The TEI entries do not provide per-entry author histories. Before a public
+redistribution, verify this upstream version discrepancy and the required
+individual attribution with the original providers / entry histories; no
+claim is made that each upstream entry's exact version was independently
+audited. Example histories (substitute the entry title for WORD):
+  https://en.wiktionary.org/w/index.php?title=WORD&action=history
+  https://ru.wiktionary.org/w/index.php?title=WORD&action=history
+
+The program's own code is separate, under MIT (see LICENSE); the
+share-alike terms above apply to the dictionary data, not the program code.
