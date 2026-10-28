@@ -18,7 +18,7 @@ A collection of native `.g3a` add-ins and developer tools for the **CASIO fx-CG5
 
 ### More projects / Другие проекты
 
-- **[GraphLab 1.06](GraphLab/README.md)** — 2D/3D graphing and fractals. This version has not yet been tested on a physical calculator / версия ещё не проверена на калькуляторе.
+- **[GraphLab 1.06](GraphLab/README.md)** — 2D/3D graphing and fractals. Hardware testing of this version has not been confirmed / проверка этой версии на калькуляторе не подтверждена.
 - **[Translator 1.10](Translator/README.md)** — offline RU↔EN translation; tested on hardware. Dictionary attribution and the menu-return code require further review.
 - **[Wireworld 1.64](Wireworld_1.64/README.md)** — sources and experimental build kept separately from the hardware-tested 1.63. Version 1.64 has not yet been tested on a physical calculator.
 
