@@ -29,9 +29,14 @@ Please see THIRD_PARTY_NOTICES.md for their respective copyright notices,
 licenses, and community attributions, which must be retained alongside binary
 redistributions.
 
-Directory-specific licenses:
-- Utilities/ is a modified fork of github.com/gbl08ma/utilities licensed under
-  the GNU GPL v2 (see Utilities/LICENSE and Utilities/PATCHNOTES.md); that
-  license governs the Utilities/ directory only.
-- PythonExtra/ contains prebuilt MIT binaries of upstream PythonExtra and
-  MicroPython sources (see THIRD_PARTY_NOTICES.md, section 8).
+Directory- and component-specific terms:
+- Utilities is a GPL-licensed fork in the separate repository
+  https://github.com/id-worker/Utilities; see its LICENSE and PATCHNOTES.md.
+- PythonExtra is in the separate repository
+  https://github.com/id-worker/PythonExtra-4.0-beta-FX-CG50. Its upstream
+  PythonExtra and MicroPython use MIT; linked components can have other terms.
+- Translator/TDIC.DAT is dictionary data with separate terms and attribution
+  questions; see Translator/LICENSE_DATA.txt and
+  Translator/PUBLICATION_REVIEW_RU.md.
+- Third-party code, libraries and assets retain their own terms. Unresolved
+  provenance is documented in THIRD_PARTY_NOTICES.md and project notices.

@@ -2,7 +2,7 @@
 
 Original portions of **ObjView**, **PyCEdit**, **Wireworld**, **obj_viewer.py**, **win_gint**, and the documentation in `docs/` are offered under the **MIT License** (see [`LICENSE`](LICENSE)). Third-party code, libraries and assets retain their own terms; the `set_menu_return_flag()` implementation and the exact source of one sample mesh require additional review (see sections 5 and 6).
 
-> Two related projects ship in **companion repositories** under their own upstream licenses: **Utilities** (modified fork of `gbl08ma/utilities`, GNU GPL v2 → repo [`Utilities`](https://github.com/id-worker/Utilities)) and **PythonExtra** (prebuilt MIT binaries of PythonExtra + MicroPython → repo [`PythonExtra-4.0-beta-FX-CG50`](https://github.com/id-worker/PythonExtra-4.0-beta-FX-CG50)). Their notices travel with those repositories.
+> Two related projects ship in **companion repositories** under their own upstream licenses: **Utilities** (modified fork of `gbl08ma/utilities`, GNU GPL v2 → repo [`Utilities`](https://github.com/id-worker/Utilities)) and **PythonExtra** (prebuilt binaries from MIT-licensed PythonExtra + MicroPython; linked components can have separate terms → repo [`PythonExtra-4.0-beta-FX-CG50`](https://github.com/id-worker/PythonExtra-4.0-beta-FX-CG50)). Their notices travel with those repositories.
 
 Prebuilt `.g3a` add-in binaries in this repository statically link against open-source Casio Prizm / fx-CG50 libraries and toolchains listed below. Identified notices and license terms are recorded below; see the unresolved review items before further redistribution.
 

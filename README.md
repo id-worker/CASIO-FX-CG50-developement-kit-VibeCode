@@ -25,7 +25,7 @@ A collection of native `.g3a` add-ins and developer tools for the **CASIO fx-CG5
 The licensing and provenance review notes accompany each project; a warning is not a substitute for permission. See also [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 > **Two companion repositories** (kept separate because they carry different upstream licenses):
-> - **PythonExtra** (prebuilt `pe-0.4.0-beta` binaries, MIT) → see sibling repository [`PythonExtra-4.0-beta-FX-CG50`](https://github.com/id-worker/PythonExtra-4.0-beta-FX-CG50)
+> - **PythonExtra** (prebuilt `pe-0.4.0-beta` binaries; upstream PythonExtra/MicroPython use MIT) → see sibling repository [`PythonExtra-4.0-beta-FX-CG50`](https://github.com/id-worker/PythonExtra-4.0-beta-FX-CG50)
 > - **Utilities** (modified fork of [gbl08ma/utilities](https://github.com/gbl08ma/utilities), **GNU GPL v2**) → see sibling repository [`Utilities`](https://github.com/id-worker/Utilities)
 
 ---
@@ -33,7 +33,7 @@ The licensing and provenance review notes accompany each project; a warning is n
 ## Quick Installation on Casio fx-CG50
 
 1. Connect the calculator to your PC via USB and press **`F1`** (*USB Flash*).
-2. Copy `ObjView.g3a`, `PyCEdit.g3a`, and/or `Wireworld.g3a` from `releases/` (optionally `Utilities/Utilities.g3a` and `PythonExtra/PythonExtra.g3a`, plus sample `.obj` files from `ObjView/models/`) into the root directory of the calculator drive.
+2. Copy `ObjView.g3a`, `PyCEdit.g3a`, and/or `Wireworld.g3a` from `releases/` into the root directory of the calculator drive. Utilities and PythonExtra are available in their separate companion repositories linked above; sample `.obj` files are in `ObjView/models/`.
 3. Safely eject the USB drive — the icons will appear in the Casio **Main Menu**.
 
 ---
@@ -49,7 +49,7 @@ The licensing and provenance review notes accompany each project; a warning is n
 5. **`docs/`** — подробный учебник и справочник по языку **PicoC** на калькуляторе (`picoc_guide.txt`) и компактная английская шпаргалка (`picoc_pocket_en.txt`) для чтения с экрана самого калькулятора.
 
 > **Две отдельные репозитории-спутника** (вынесены, потому что у них свои лицензии апстримов):
-> - **PythonExtra** (готовые бинарники `pe-0.4.0-beta`, MIT) → репозиторий [`PythonExtra-4.0-beta-FX-CG50`](https://github.com/id-worker/PythonExtra-4.0-beta-FX-CG50)
+> - **PythonExtra** (готовые бинарники `pe-0.4.0-beta`; апстрим PythonExtra/MicroPython — MIT) → репозиторий [`PythonExtra-4.0-beta-FX-CG50`](https://github.com/id-worker/PythonExtra-4.0-beta-FX-CG50)
 > - **Utilities** (патченый форк [gbl08ma/utilities](https://github.com/gbl08ma/utilities), **GNU GPL v2**) → репозиторий [`Utilities`](https://github.com/id-worker/Utilities)
 
 ---
