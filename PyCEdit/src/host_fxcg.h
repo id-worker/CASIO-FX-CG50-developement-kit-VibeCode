@@ -7,6 +7,7 @@
 #define READWRITE       2
 #define CREATEMODE_FILE 1
 
+void Bdisp_EnableColor(int mode);
 void Bdisp_PutDisp_DD(void);
 void OS_InnerWait_ms(int ms);
 int  RTC_GetTicks(void);

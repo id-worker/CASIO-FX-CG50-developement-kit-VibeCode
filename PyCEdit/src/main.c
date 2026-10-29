@@ -39,10 +39,21 @@
 
 #define RGB565(r,g,b)   ((unsigned short)((((r)&0xF8)<<8)|(((g)&0xFC)<<3)|(((b)&0xF8)>>3)))
 
+/* Light-only UI: white paper, black ink; syntax uses RGB565 colors.
+   Red strings and blue functions have higher computed contrast against white
+   than in 1.14. Actual legibility still needs a physical CG50 LCD check. */
 #define COL_BLACK       0x0000
 #define COL_WHITE       0xFFFF
-#define COL_HDR_BG      0x0000
-#define COL_HDR_FG      0xFFFF
+#define SYN_NORMAL      RGB565(0,   0,     0)
+#define SYN_KEYWORD     RGB565(0,   40,  224)
+#define SYN_PREPROC     RGB565(144, 0,   176)
+#define SYN_STRING      RGB565(192, 0,     0)
+#define SYN_COMMENT     RGB565(0,  104,  112)
+#define SYN_NUMBER      RGB565(176, 48,    0)
+#define SYN_FUNCTION    RGB565(0,   72,  192)
+#define SYN_OP          RGB565(32,  32,   32)
+#define COL_HDR_BG      COL_BLACK
+#define COL_HDR_FG      COL_WHITE
 #define COL_GUTTER_BG   COL_WHITE
 #define COL_GUTTER_FG   COL_BLACK
 #define COL_GUTTER_CUR  COL_BLACK
@@ -51,15 +62,6 @@
 #define COL_SEL_BG      COL_WHITE
 #define COL_SEL_ROW     COL_BLACK
 #define COL_CURSOR      COL_BLACK
-
-/* Syntax highlighting colors (readable on white LCD) */
-#define SYN_NORMAL      RGB565(24,  28,  34)
-#define SYN_KEYWORD     RGB565(0,   72,  188)
-#define SYN_PREPROC     RGB565(122, 31,  162)
-#define SYN_STRING      RGB565(18,  122, 46)
-#define SYN_COMMENT     RGB565(112, 122, 136)
-#define SYN_NUMBER      RGB565(0,   116, 132)
-#define SYN_OP          RGB565(70,  80,  95)
 
 /* Badges */
 #define COL_BADGE_PY    COL_BLACK
@@ -500,6 +502,14 @@ static char translate_key_char(int k, int shf, int alp)
 /* ------------------------------------------------------------------ */
 /* Drawing primitives (direct 384x216 RGB565 VRAM)                     */
 /* ------------------------------------------------------------------ */
+/* OS services may change display state. Reassert full-color mode immediately
+   before presenting every frame, not only once at process startup. */
+static void present_frame(void)
+{
+    Bdisp_EnableColor(1);
+    Bdisp_PutDisp_DD();
+}
+
 static void px_rect(int x1, int y1, int x2, int y2, unsigned short col)
 {
     int x, y;
@@ -667,11 +677,26 @@ static int str_ends_ci(const char *s, const char *suf)
     return 1;
 }
 
+/* Language selection is critical to highlighting. Keep it independent of
+   the OS-provided strlen syscall and of the current locale. */
+static int extension_equals(const char *a, const char *b)
+{
+    if (!a) return 0;
+    while (*a && *b) {
+        char c = *a++;
+        if (c >= 'A' && c <= 'Z') c = (char)(c + ('a' - 'A'));
+        if (c != *b++) return 0;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
 static int detect_lang(const char *name)
 {
-    if (str_ends_ci(name, ".py")) return LANG_PY;
-    if (str_ends_ci(name, ".c") || str_ends_ci(name, ".h") ||
-        str_ends_ci(name, ".cpp") || str_ends_ci(name, ".hpp"))
+    const char *dot = 0, *p;
+    for (p = name; *p; p++) if (*p == '.') dot = p;
+    if (extension_equals(dot, ".py")) return LANG_PY;
+    if (extension_equals(dot, ".c") || extension_equals(dot, ".h") ||
+        extension_equals(dot, ".cpp") || extension_equals(dot, ".hpp"))
         return LANG_C;
     return LANG_PLAIN;
 }
@@ -986,7 +1011,7 @@ static int modal_confirm(const char *title, const char *line1, const char *line2
         if (line2) draw_str_n(44, 102, line2, 48, COL_GUTTER_FG);
         draw_str(44, 124, "EXE/F1 = Yes    EXIT/F6 = Cancel", COL_BADGE_PY);
         draw_fkeys(fk, 1);
-        Bdisp_PutDisp_DD();
+        present_frame();
 
         k = poll_editor_key(&mc);
         if (k == MK_EXE || k == MK_F1) {
@@ -1045,7 +1070,7 @@ static int modal_input_name(const char *title, char *buf, int max_len, int allow
         draw_str(34, 129, "ALPHA toggles letters/digits, DEL erases", COL_GUTTER_FG);
 
         draw_fkeys(fk, 0);
-        Bdisp_PutDisp_DD();
+        present_frame();
 
         k = poll_editor_key(&mc);
         if (!k) {
@@ -1459,7 +1484,7 @@ static void editor_move_vert(int delta_lines)
 /* Syntax Highlighting for Python (.py) and C / PicoC (.c, .h)         */
 /* ------------------------------------------------------------------ */
 static const char * const py_keywords[] = {
-    "False","None","True","and","as","assert","break","class","continue",
+    "False","None","True","and","as","assert","async","await","break","class","continue",
     "def","del","elif","else","except","finally","for","from","global",
     "if","import","in","is","lambda","nonlocal","not","or","pass",
     "raise","return","try","while","with","yield", NULL
@@ -1486,14 +1511,39 @@ static int is_ident_char(char c)
 static int match_kw(const char *s, int len, const char * const *list)
 {
     int i;
+    /* No OS strlen call per candidate: one short direct comparison is enough. */
     for (i = 0; list[i]; i++) {
-        if ((int)strlen(list[i]) == len && strncmp(s, list[i], (size_t)len) == 0)
-            return 1;
+        int j = 0;
+        while (j < len && list[i][j] && s[j] == list[i][j]) j++;
+        if (j == len && list[i][j] == '\0') return 1;
     }
     return 0;
 }
 
-static void draw_code_line(int y, int ls, int le, int lang, int *in_block_comment)
+/* Persistent state shared by visible rows and by the scan above the screen. */
+enum { SYN_CODE = 0, SYN_C_BLOCK, SYN_PY_TRIPLE_SQ, SYN_PY_TRIPLE_DQ };
+
+/* Return the position of a Python string quote relative to s, including valid
+   r/b/u/f and br/rb/fr/rf prefixes. This is lexical coloring, not a parser. */
+static int py_string_quote(const char *s, int n)
+{
+    char a, b;
+    if (n <= 0) return -1;
+    if (s[0] == '\'' || s[0] == '"') return 0;
+    a = (char)tolower((unsigned char)s[0]);
+    if (n >= 2 && (s[1] == '\'' || s[1] == '"') &&
+        (a == 'r' || a == 'b' || a == 'u' || a == 'f')) return 1;
+    if (n < 3 || (s[2] != '\'' && s[2] != '"')) return -1;
+    b = (char)tolower((unsigned char)s[1]);
+    if ((a == 'r' && (b == 'b' || b == 'f')) ||
+        ((a == 'b' || a == 'f') && b == 'r')) return 2;
+    return -1;
+}
+
+/* Color a line, or just update state when draw=0. Always scan from the start
+   of the logical line, even when horizontally scrolled, so quotes/comments
+   to the left cannot accidentally turn the visible portion into code. */
+static void syntax_scan_line(int y, int ls, int le, int lang, int *state, int draw)
 {
     int len = le - ls;
     const char *s = edit_buf + ls;
@@ -1501,117 +1551,110 @@ static void draw_code_line(int y, int ls, int le, int lang, int *in_block_commen
 
     while (i < len) {
         unsigned short col = SYN_NORMAL;
-        int tok_end = i + 1;
+        int end = i + 1;
+        int quote_at = -1;
 
-        if (*in_block_comment) {
+        if (lang == LANG_PLAIN) {
+            end = len;
+        } else if (*state == SYN_C_BLOCK) {
             col = SYN_COMMENT;
-            while (tok_end < len) {
-                if (s[tok_end - 1] == '*' && s[tok_end] == '/') {
-                    tok_end++;
-                    *in_block_comment = 0;
+            end = i;
+            while (end + 1 < len && !(s[end] == '*' && s[end + 1] == '/')) end++;
+            if (end + 1 < len) { end += 2; *state = SYN_CODE; }
+            else end = len;
+        } else if (*state == SYN_PY_TRIPLE_SQ || *state == SYN_PY_TRIPLE_DQ) {
+            char q = (*state == SYN_PY_TRIPLE_SQ) ? '\'' : '"';
+            col = SYN_STRING;
+            end = i;
+            while (end < len) {
+                if (s[end] == '\\' && end + 1 < len) { end += 2; continue; }
+                if (end + 2 < len && s[end] == q && s[end + 1] == q && s[end + 2] == q) {
+                    end += 3;
+                    *state = SYN_CODE;
                     break;
                 }
-                tok_end++;
+                end++;
             }
-            if (*in_block_comment) tok_end = len;
-        } else if (lang == LANG_PY && s[i] == '#') {
+        } else if ((lang == LANG_PY && s[i] == '#') ||
+                   (lang == LANG_C && i + 1 < len && s[i] == '/' && s[i + 1] == '/')) {
             col = SYN_COMMENT;
-            tok_end = len;
-        } else if (lang == LANG_C && i + 1 < len && s[i] == '/' && s[i + 1] == '/') {
-            col = SYN_COMMENT;
-            tok_end = len;
+            end = len;
         } else if (lang == LANG_C && i + 1 < len && s[i] == '/' && s[i + 1] == '*') {
             col = SYN_COMMENT;
-            tok_end = i + 2;
-            *in_block_comment = 1;
-            while (tok_end + 1 <= len) {
-                if (tok_end < len && s[tok_end - 1] == '*' && s[tok_end] == '/' && tok_end >= i + 3) {
-                    tok_end++;
-                    *in_block_comment = 0;
-                    break;
-                }
-                if (tok_end == len) break;
-                tok_end++;
-            }
+            end = i + 2;
+            while (end + 1 < len && !(s[end] == '*' && s[end + 1] == '/')) end++;
+            if (end + 1 < len) end += 2;
+            else { end = len; *state = SYN_C_BLOCK; }
         } else if (lang == LANG_C && s[i] == '#') {
             col = SYN_PREPROC;
-            while (tok_end < len && s[tok_end] == ' ') tok_end++;
-            while (tok_end < len && is_ident_char(s[tok_end])) tok_end++;
+            while (end < len && (s[end] == ' ' || s[end] == '\t')) end++;
+            while (end < len && is_ident_char(s[end])) end++;
         } else if (lang == LANG_PY && s[i] == '@') {
             col = SYN_PREPROC;
-            while (tok_end < len && is_ident_char(s[tok_end])) tok_end++;
-        } else if (s[i] == '"' || s[i] == '\'') {
-            char q = s[i];
+            while (end < len && (is_ident_char(s[end]) || s[end] == '.')) end++;
+        } else if ((lang == LANG_PY && (quote_at = py_string_quote(s + i, len - i)) >= 0) ||
+                   (lang == LANG_C && (s[i] == '\'' || s[i] == '"'))) {
+            char q;
+            int qpos = i + (quote_at >= 0 ? quote_at : 0);
+            int triple = (lang == LANG_PY && qpos + 2 < len &&
+                          s[qpos] == s[qpos + 1] && s[qpos] == s[qpos + 2]);
+            int closed = 0;
+            q = s[qpos];
             col = SYN_STRING;
-            while (tok_end < len) {
-                if (s[tok_end] == '\\' && tok_end + 1 < len) {
-                    tok_end += 2;
-                    continue;
-                }
-                if (s[tok_end] == q) {
-                    tok_end++;
+            end = qpos + (triple ? 3 : 1);
+            while (end < len) {
+                if (s[end] == '\\' && end + 1 < len) { end += 2; continue; }
+                if (s[end] == q && (!triple || (end + 2 < len &&
+                    s[end + 1] == q && s[end + 2] == q))) {
+                    end += triple ? 3 : 1;
+                    closed = 1;
                     break;
                 }
-                tok_end++;
+                end++;
             }
+            if (triple && !closed)
+                *state = (q == '\'') ? SYN_PY_TRIPLE_SQ : SYN_PY_TRIPLE_DQ;
         } else if (s[i] >= '0' && s[i] <= '9') {
             col = SYN_NUMBER;
-            while (tok_end < len && (is_ident_char(s[tok_end]) || s[tok_end] == '.'))
-                tok_end++;
+            while (end < len && (is_ident_char(s[end]) || s[end] == '.')) end++;
         } else if (is_ident_start(s[i])) {
-            while (tok_end < len && is_ident_char(s[tok_end])) tok_end++;
-            if (lang == LANG_PY && match_kw(s + i, tok_end - i, py_keywords))
+            int after;
+            while (end < len && is_ident_char(s[end])) end++;
+            if ((lang == LANG_PY && match_kw(s + i, end - i, py_keywords)) ||
+                (lang == LANG_C && match_kw(s + i, end - i, c_keywords))) {
                 col = SYN_KEYWORD;
-            else if (lang == LANG_C && match_kw(s + i, tok_end - i, c_keywords))
-                col = SYN_KEYWORD;
-        } else if (s[i] != ' ') {
+            } else {
+                after = end;
+                while (after < len && (s[after] == ' ' || s[after] == '\t')) after++;
+                if (after < len && s[after] == '(') col = SYN_FUNCTION;
+            }
+        } else if (s[i] != ' ' && s[i] != '\t') {
             col = SYN_OP;
         }
 
-        for (; i < tok_end; i++) {
+        /* Every branch must advance at least one byte, including bad source. */
+        if (end <= i) end = i + 1;
+        for (; i < end; i++) {
             int vis_c = i - scroll_col;
-            if (vis_c >= 0 && vis_c < CODE_COLS && s[i] != ' ') {
+            if (draw && vis_c >= 0 && vis_c < CODE_COLS && s[i] != ' ' && s[i] != '\t')
                 draw_char(CODE_X + vis_c * FONT_W, y + 1, s[i], col);
-            }
         }
     }
 }
 
-/* Compute block-comment state entering scroll_line in C mode */
-static int block_comment_before_line(int target_ln)
+/* Recreate the language state above the visible area using exactly the same
+   scanner as the renderer. No 48-KB per-character cache is needed. */
+static int syntax_state_before_line(int target_ln)
 {
-    int i = 0, ln = 0, in_bc = 0;
-    if (edit_lang != LANG_C || target_ln <= 0) return 0;
-    while (i < edit_len && ln < target_ln) {
-        char c = edit_buf[i];
-        if (c == '\n') {
-            ln++;
-            i++;
-        } else if (in_bc) {
-            if (c == '*' && i + 1 < edit_len && edit_buf[i + 1] == '/') {
-                in_bc = 0;
-                i += 2;
-            } else {
-                i++;
-            }
-        } else if (c == '/' && i + 1 < edit_len && edit_buf[i + 1] == '/') {
-            while (i < edit_len && edit_buf[i] != '\n') i++;
-        } else if (c == '/' && i + 1 < edit_len && edit_buf[i + 1] == '*') {
-            in_bc = 1;
-            i += 2;
-        } else if (c == '"' || c == '\'') {
-            char q = c;
-            i++;
-            while (i < edit_len && edit_buf[i] != '\n') {
-                if (edit_buf[i] == '\\' && i + 1 < edit_len) { i += 2; continue; }
-                if (edit_buf[i] == q) { i++; break; }
-                i++;
-            }
-        } else {
-            i++;
-        }
+    int pos = 0, ln = 0, state = SYN_CODE;
+    if (edit_lang == LANG_PLAIN || target_ln <= 0) return state;
+    while (pos < edit_len && ln < target_ln) {
+        int le = line_end_of(pos);
+        syntax_scan_line(0, pos, le, edit_lang, &state, 0);
+        pos = (le < edit_len && edit_buf[le] == '\n') ? le + 1 : edit_len;
+        ln++;
     }
-    return in_bc;
+    return state;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1624,7 +1667,7 @@ static const char * const sym_grid[24] = {
 };
 
 static const char * const c_snip_labels[8] = {
-    "#include <stdio.h>",
+    "#include <stdio.h> [SDK]",
     "#include <fxcg/display.h>",
     "#include <fxcg/keyboard.h>",
     "printf(\"...\\n\");",
@@ -1680,83 +1723,283 @@ static int key_to_digit_idx(int k)
     }
 }
 
+/* The first 43 names are the exact header registry in Utilities commit
+   aff6ceccfbc68bbf59353b2a26b858bb8323c9c5.  The last group is for C
+   compiled with the native libfxcg SDK and is visibly marked [SDK]. */
+typedef struct {
+    const char *name;
+    unsigned char sdk_only;
+} include_entry_t;
+static const include_entry_t include_catalog[] = {
+    /* Registered in Utilities PicoC, fx-CG50 system APIs. */
+    { "fxcg/display.h", 0 },
+    { "fxcg/keyboard.h", 0 },
+    { "fxcg/file.h", 0 },
+    { "fxcg/rtc.h", 0 },
+    { "fxcg/system.h", 0 },
+    { "fxcg/heap.h", 0 },
+    { "fxcg/misc.h", 0 },
+    { "fxcg/serial.h", 0 },
+    { "fxcg/app.h", 0 },
+    /* Registered in Utilities PicoC, Utilities APIs. */
+    { "utilities/aboutGUI.h", 0 },
+    { "utilities/calendarGUI.h", 0 },
+    { "utilities/calendarProvider.h", 0 },
+    { "utilities/chronoGUI.h", 0 },
+    { "utilities/chronoProvider.h", 0 },
+    { "utilities/editorGUI.h", 0 },
+    { "utilities/fileGUI.h", 0 },
+    { "utilities/fileProvider.h", 0 },
+    { "utilities/firstRunGUI.h", 0 },
+    { "utilities/graphicsProvider.h", 0 },
+    { "utilities/hardwareProvider.h", 0 },
+    { "utilities/homeGUI.h", 0 },
+    { "utilities/imageGUI.h", 0 },
+    { "utilities/inputGUI.h", 0 },
+    { "utilities/keyboardProvider.h", 0 },
+    { "utilities/lightGUI.h", 0 },
+    { "utilities/lockGUI.h", 0 },
+    { "utilities/lockProvider.h", 0 },
+    { "utilities/memsysGUI.h", 0 },
+    { "utilities/menuGUI.h", 0 },
+    { "utilities/powerGUI.h", 0 },
+    { "utilities/selectorGUI.h", 0 },
+    { "utilities/settingsGUI.h", 0 },
+    { "utilities/settingsProvider.h", 0 },
+    { "utilities/stringsProvider.h", 0 },
+    { "utilities/tasksGUI.h", 0 },
+    { "utilities/textGUI.h", 0 },
+    { "utilities/textEditGUI.h", 0 },
+    { "utilities/timeGUI.h", 0 },
+    { "utilities/timeProvider.h", 0 },
+    { "utilities/toolsGUI.h", 0 },
+    { "utilities/toolsProvider.h", 0 },
+    { "utilities/versionProvider.h", 0 },
+    { "utilities/structInit.h", 0 },
+    /* Native libfxcg SDK headers: not registered by Utilities PicoC. */
+    { "fxcg/registers.h", 1 },
+    { "fxcg/tmu.h", 1 },
+    { "fxcg/usb.h", 1 },
+    { "alloca.h", 1 },
+    { "asm.h", 1 },
+    { "assert.h", 1 },
+    { "ctype.h", 1 },
+    { "errno.h", 1 },
+    { "locale.h", 1 },
+    { "math.h", 1 },
+    { "setjmp.h", 1 },
+    { "stddef.h", 1 },
+    { "stdint.h", 1 },
+    { "stdio.h", 1 },
+    { "stdlib.h", 1 },
+    { "string.h", 1 },
+    { "time.h", 1 },
+    { "unistd.h", 1 },
+    { "sys/types.h", 1 },
+};
+
+/* Import templates: the first group is common on CG50 Python firmware;
+   [PE] refers to PythonExtra beta 0.4's port configuration/documentation,
+   not a guarantee about an unknown binary build. [FILE] requires the
+   corresponding external .py file. Selecting an entry only inserts text. */
+enum { PYMOD_COMMON = 0, PYMOD_EXTRA, PYMOD_FILE };
+typedef struct {
+    const char *name;
+    unsigned char availability;
+} pymodule_entry_t;
+static const pymodule_entry_t pymodule_catalog[] = {
+    { "math",        PYMOD_COMMON },
+    { "random",      PYMOD_COMMON },
+    { "casioplot",   PYMOD_COMMON },
+    { "gint",        PYMOD_EXTRA },
+    { "kandinsky",   PYMOD_EXTRA },
+    { "ion",         PYMOD_EXTRA },
+    { "time",        PYMOD_EXTRA },
+    { "cmath",       PYMOD_EXTRA },
+    { "array",       PYMOD_EXTRA },
+    { "collections", PYMOD_EXTRA },
+    { "gc",          PYMOD_EXTRA },
+    { "io",          PYMOD_EXTRA },
+    { "struct",      PYMOD_EXTRA },
+    { "sys",         PYMOD_EXTRA },
+    { "micropython", PYMOD_EXTRA },
+    { "builtins",    PYMOD_EXTRA },
+    { "turtle",      PYMOD_FILE },
+    { "matplotl",    PYMOD_FILE },
+};
+
+#define LIB_PAGE_SIZE 8
+#define INCLUDE_COUNT ((int)(sizeof(include_catalog) / sizeof(include_catalog[0])))
+#define PYMODULE_COUNT ((int)(sizeof(pymodule_catalog) / sizeof(pymodule_catalog[0])))
+enum { PALETTE_SYMBOLS = 0, PALETTE_C, PALETTE_PY, PALETTE_LIBS, PALETTE_PYMOD };
+enum { PALETTE_STAY = 0, PALETTE_CLOSE, PALETTE_INSERT };
+typedef struct { int page, sel; } palette_state_t;
+
+static int include_page_count(void)
+{
+    return (INCLUDE_COUNT + LIB_PAGE_SIZE - 1) / LIB_PAGE_SIZE;
+}
+
+static int pymodule_page_count(void)
+{
+    return (PYMODULE_COUNT + LIB_PAGE_SIZE - 1) / LIB_PAGE_SIZE;
+}
+
+static int palette_catalog_count(const palette_state_t *p)
+{
+    return p->page == PALETTE_LIBS ? INCLUDE_COUNT : PYMODULE_COUNT;
+}
+
+static void catalog_next_page(palette_state_t *p, int direction)
+{
+    int count = palette_catalog_count(p);
+    int pages = (count + LIB_PAGE_SIZE - 1) / LIB_PAGE_SIZE;
+    int page = p->sel / LIB_PAGE_SIZE;
+    int row = p->sel % LIB_PAGE_SIZE;
+    page = (page + direction + pages) % pages;
+    p->sel = page * LIB_PAGE_SIZE + row;
+    if (p->sel >= count) p->sel = count - 1;
+}
+
+/* Input handling is separate from drawing so every page, boundary and digit
+   shortcut can be tested, including the partially filled final page. */
+static int palette_key(palette_state_t *p, int k, int shifted)
+{
+    int digit;
+    if (k == MK_EXIT || k == MK_F6) return PALETTE_CLOSE;
+    if (k == MK_F1) { p->page = PALETTE_SYMBOLS; p->sel = 0; return PALETTE_STAY; }
+    if (k == MK_F2) { p->page = PALETTE_C;       p->sel = 0; return PALETTE_STAY; }
+    if (k == MK_F3) { p->page = PALETTE_PY;      p->sel = 0; return PALETTE_STAY; }
+    if (k == MK_F4) { p->page = PALETTE_LIBS;    p->sel = 0; return PALETTE_STAY; }
+    /* F5 opens Python modules from the symbol/snippet tabs. In either
+       catalog, F5 remains page forward, SHIFT+F5 page backward. */
+    if (k == MK_F5 && p->page != PALETTE_LIBS && p->page != PALETTE_PYMOD) {
+        p->page = PALETTE_PYMOD; p->sel = 0; return PALETTE_STAY;
+    }
+
+    if (p->page == PALETTE_SYMBOLS) {
+        if (k == MK_LEFT)  p->sel = (p->sel + 23) % 24;
+        if (k == MK_RIGHT) p->sel = (p->sel + 1) % 24;
+        if (k == MK_UP)    p->sel = (p->sel + 16) % 24;
+        if (k == MK_DOWN)  p->sel = (p->sel + 8) % 24;
+        return k == MK_EXE ? PALETTE_INSERT : PALETTE_STAY;
+    }
+
+    if (p->page == PALETTE_C || p->page == PALETTE_PY) {
+        if (k == MK_UP)   p->sel = (p->sel + 7) % 8;
+        if (k == MK_DOWN) p->sel = (p->sel + 1) % 8;
+        digit = key_to_digit_idx(k);
+        if (digit >= 0) { p->sel = digit; return PALETTE_INSERT; }
+        return k == MK_EXE ? PALETTE_INSERT : PALETTE_STAY;
+    }
+
+    {
+        int count = palette_catalog_count(p);
+        if (k == MK_UP)   p->sel = (p->sel + count - 1) % count;
+        if (k == MK_DOWN) p->sel = (p->sel + 1) % count;
+        if (k == MK_LEFT || (k == MK_F5 && shifted)) catalog_next_page(p, -1);
+        if (k == MK_RIGHT || (k == MK_F5 && !shifted)) catalog_next_page(p, 1);
+        digit = key_to_digit_idx(k);
+        if (digit >= 0) {
+            int candidate = (p->sel / LIB_PAGE_SIZE) * LIB_PAGE_SIZE + digit;
+            if (candidate < count) { p->sel = candidate; return PALETTE_INSERT; }
+            return PALETTE_STAY; /* No phantom rows on the last page. */
+        }
+    }
+    return k == MK_EXE ? PALETTE_INSERT : PALETTE_STAY;
+}
+
+static const char *palette_selected_text(const palette_state_t *p, char *scratch)
+{
+    if (p->page == PALETTE_SYMBOLS) return sym_grid[p->sel];
+    if (p->page == PALETTE_C) return c_snip_texts[p->sel];
+    if (p->page == PALETTE_PY) return py_snip_texts[p->sel];
+    /* All catalog names are compile-time constants shorter than 60 bytes. */
+    if (p->page == PALETTE_PYMOD) {
+        sprintf(scratch, "import %s\n", pymodule_catalog[p->sel].name);
+        return scratch;
+    }
+    sprintf(scratch, "#include <%s>\n", include_catalog[p->sel].name);
+    return scratch;
+}
+
 static void open_symbol_palette(void)
 {
-    int page = 0; /* 0 = Symbols, 1 = C/PicoC, 2 = PythonExtra */
-    int sel = 0;
+    palette_state_t p = { PALETTE_SYMBOLS, 0 };
     wait_all_released();
 
     for (;;) {
-        const char *fk[6] = { "SYMS", "C/PICO", "PYEXT", "", "", "CLOSE" };
-        int mc = 0, k, i;
+        int catalog = (p.page == PALETTE_LIBS || p.page == PALETTE_PYMOD);
+        const char *fk[6] = { "SYMS", "C/PICO", "PYEXT", "LIBS",
+            catalog ? (current_shift() ? "<PAGE" : "PAGE>") : "PYMOD", "CLOSE" };
+        int mc = 0, k, i, action, shifted;
+        char title[80];
 
         px_rect(18, 28, 365, 186, COL_WHITE);
         px_box(18, 28, 365, 186, COL_BLACK);
         px_rect(19, 29, 364, 46, COL_BLACK);
-        draw_str(26, 33, page == 0 ? "Insert Symbol (Arrows + EXE)" :
-                         page == 1 ? "C / PicoC Snippets (1-8 or EXE)" :
-                                     "PythonExtra Snippets (1-8 or EXE)", COL_WHITE);
+        if (p.page == PALETTE_LIBS)
+            sprintf(title, "LIBS %d/%d 1-8/EXE <>/F5 [SDK]=NATIVE", p.sel / LIB_PAGE_SIZE + 1, include_page_count());
+        else if (p.page == PALETTE_PYMOD)
+            sprintf(title, "PYMOD %d/%d 1-8/EXE <>/F5 PE=EXTRA FILE=.PY", p.sel / LIB_PAGE_SIZE + 1, pymodule_page_count());
+        else
+            strcpy(title, p.page == PALETTE_SYMBOLS ? "Insert Symbol (Arrows + EXE)" :
+                          p.page == PALETTE_C ? "C / PicoC Snippets (1-8 or EXE)" :
+                                               "PythonExtra Snippets (1-8 or EXE)");
+        draw_str_n(26, 33, title, 52, COL_WHITE);
 
-        if (page == 0) {
-            /* 3 rows x 8 cols grid of symbols */
+        if (p.page == PALETTE_SYMBOLS) {
             for (i = 0; i < 24; i++) {
                 int r = i / 8, c = i % 8;
                 int x1 = 28 + c * 41;
                 int y1 = 56 + r * 36;
-                int is_s = (i == sel);
-                px_rect(x1, y1, x1 + 35, y1 + 28, is_s ? COL_BLACK : COL_GUTTER_BG);
+                int selected = (i == p.sel);
+                px_rect(x1, y1, x1 + 35, y1 + 28, selected ? COL_BLACK : COL_GUTTER_BG);
                 px_box(x1, y1, x1 + 35, y1 + 28, COL_BLACK);
-                draw_str(x1 + 15, y1 + 9, sym_grid[i], is_s ? COL_WHITE : COL_BLACK);
+                draw_str(x1 + 15, y1 + 9, sym_grid[i], selected ? COL_WHITE : COL_BLACK);
             }
             draw_str(28, 168, "Tip: SHIFT + * / + - 0 . , also type { } [ ] : = ;", COL_GUTTER_FG);
         } else {
-            const char * const *lbls = (page == 1) ? c_snip_labels : py_snip_labels;
-            for (i = 0; i < 8; i++) {
+            int first = catalog ? (p.sel / LIB_PAGE_SIZE) * LIB_PAGE_SIZE : 0;
+            int count = catalog ? palette_catalog_count(&p) : 8;
+            const char * const *lbls = p.page == PALETTE_C ? c_snip_labels : py_snip_labels;
+            for (i = 0; i < LIB_PAGE_SIZE && first + i < count; i++) {
+                int index = first + i;
                 int y1 = 50 + i * 16;
-                int is_s = (i == sel);
-                if (is_s) px_rect(24, y1, 359, y1 + 14, COL_SEL_ROW);
-                draw_char(28, y1 + 2, (char)('1' + i), is_s ? COL_WHITE : COL_BLACK);
-                draw_str_n(42, y1 + 2, lbls[i], 50, is_s ? COL_WHITE : COL_BLACK);
+                int selected = (index == p.sel);
+                char label[80];
+                const char *text;
+                if (p.page == PALETTE_LIBS) {
+                    sprintf(label, "#include <%s>%s", include_catalog[index].name,
+                            include_catalog[index].sdk_only ? " [SDK]" : "");
+                    text = label;
+                } else if (p.page == PALETTE_PYMOD) {
+                    unsigned char availability = pymodule_catalog[index].availability;
+                    sprintf(label, "import %s%s", pymodule_catalog[index].name,
+                            availability == PYMOD_EXTRA ? " [PE]" :
+                            availability == PYMOD_FILE ? " [FILE]" : "");
+                    text = label;
+                } else text = lbls[index];
+                if (selected) px_rect(24, y1, 359, y1 + 14, COL_SEL_ROW);
+                draw_char(28, y1 + 2, (char)('1' + i), selected ? COL_WHITE : COL_BLACK);
+                draw_str_n(42, y1 + 2, text, 50, selected ? COL_WHITE : COL_BLACK);
             }
         }
 
-        draw_fkeys(fk, 1 << page);
-        Bdisp_PutDisp_DD();
+        draw_fkeys(fk, 1 << p.page);
+        present_frame();
 
         k = poll_editor_key(&mc);
         if (!k) { OS_InnerWait_ms(10); continue; }
-
-        if (k == MK_EXIT || k == MK_F6) { wait_all_released(); return; }
-        if (k == MK_F1) { page = 0; sel = 0; continue; }
-        if (k == MK_F2) { page = 1; sel = 0; continue; }
-        if (k == MK_F3) { page = 2; sel = 0; continue; }
-
-        if (page == 0) {
-            if (k == MK_LEFT)  sel = (sel + 23) % 24;
-            if (k == MK_RIGHT) sel = (sel + 1) % 24;
-            if (k == MK_UP)    sel = (sel + 16) % 24;
-            if (k == MK_DOWN)  sel = (sel + 8) % 24;
-            if (k == MK_EXE) {
-                insert_text_at_cursor(sym_grid[sel]);
-                wait_all_released();
-                return;
-            }
-        } else {
-            const char * const *txts = (page == 1) ? c_snip_texts : py_snip_texts;
-            int didx = key_to_digit_idx(k);
-            if (k == MK_UP)   sel = (sel + 7) % 8;
-            if (k == MK_DOWN) sel = (sel + 1) % 8;
-            if (didx >= 0) {
-                sel = didx;
-                insert_text_at_cursor(txts[sel]);
-                wait_all_released();
-                return;
-            }
-            if (k == MK_EXE) {
-                insert_text_at_cursor(txts[sel]);
-                wait_all_released();
-                return;
-            }
+        shifted = current_shift();
+        consume_one_shot_mods();
+        action = palette_key(&p, k, shifted);
+        if (action == PALETTE_CLOSE) { wait_all_released(); return; }
+        if (action == PALETTE_INSERT) {
+            char scratch[100];
+            insert_text_at_cursor(palette_selected_text(&p, scratch));
+            wait_all_released();
+            return;
         }
     }
 }
@@ -1825,7 +2068,7 @@ static void open_clip_menu(void)
         draw_str(36, 138, "In [SEL]: F1=Copy F2=Cut F4=Indent DEL=Erase", COL_BADGE_C);
         draw_str(36, 152, "Shortcut: VARS = Select, SHIFT+VARS = All", COL_GUTTER_FG);
         draw_fkeys(fk, 0);
-        Bdisp_PutDisp_DD();
+        present_frame();
 
         k = poll_editor_key(&mc);
         if (!k) { OS_InnerWait_ms(10); continue; }
@@ -1909,7 +2152,7 @@ static void open_help_card(void)
         draw_str(24, 176, "FILES tab: F4 switches .py <-> .c in 1 press!", COL_BADGE_PY);
 
         draw_fkeys(fk, 0);
-        Bdisp_PutDisp_DD();
+        present_frame();
 
         k = poll_editor_key(&mc);
         if (k == MK_EXIT || k == MK_EXE || k == MK_F6 || k == MK_OPTN) {
@@ -1933,11 +2176,16 @@ static void render_files_tab(void)
 
     px_rect(0, 0, VIS_W - 1, HDR_H - 1, COL_HDR_BG);
     format_dir_display(cur_dir, dir_disp, sizeof(dir_disp));
-    sprintf(hdr, "PyCEdit (%s)", dir_disp);
-    draw_str_n(6, 4, hdr, 40, COL_HDR_FG);
-
+    sprintf(hdr, "PyCEdit 1.15 (%s)", dir_disp);
     sprintf(rinfo, "[%s] %d", filter_code_only ? "py/c" : "ALL", dir_count);
-    draw_str(VIS_W - 6 - (int)strlen(rinfo) * FONT_W, 4, rinfo, COL_WHITE);
+    {
+        int rx = VIS_W - 6 - (int)strlen(rinfo) * FONT_W;
+        int left_chars = (rx - 12) / FONT_W;
+        if (left_chars > 40) left_chars = 40;
+        if (left_chars < 0) left_chars = 0;
+        draw_str_n(6, 4, hdr, left_chars, COL_HDR_FG);
+        draw_str(rx, 4, rinfo, COL_HDR_FG);
+    }
 
     px_rect(0, BODY_Y, VIS_W - 1, FKEY_Y - 2, COL_WHITE);
 
@@ -2021,14 +2269,15 @@ static void render_edit_tab(void)
     /* PythonExtra top black bar */
     px_rect(0, 0, VIS_W - 1, HDR_H - 1, COL_HDR_BG);
     join_path(hdr_left, sizeof(hdr_left), bname, edit_dirty ? " *" : "");
-    draw_str_n(6, 4, hdr_left, 32, COL_HDR_FG);
 
     if (has_sel)
-        sprintf(pos_str, "%dc L%d", s1 - s0, cur_ln + 1);
+        sprintf(pos_str, "[%s] %dc L%d", edit_lang == LANG_PY ? "PY" :
+                edit_lang == LANG_C ? "C" : "TXT", s1 - s0, cur_ln + 1);
     else
-        sprintf(pos_str, "L%d:C%d", cur_ln + 1, cur_col + 1);
+        sprintf(pos_str, "[%s] L%d:C%d", edit_lang == LANG_PY ? "PY" :
+                edit_lang == LANG_C ? "C" : "TXT", cur_ln + 1, cur_col + 1);
     {
-        int rx = VIS_W - 6;
+        int rx = VIS_W - 6, pos_x, left_chars;
         if (shf || alpha_mode != ALP_OFF) {
             draw_mod_badge(rx);
             rx -= 30;
@@ -2039,7 +2288,12 @@ static void render_edit_tab(void)
             draw_str(rx - 21, 4, "SEL", COL_WHITE);
             rx -= 30;
         }
-        draw_str(rx - (int)strlen(pos_str) * FONT_W, 4, pos_str, COL_GUTTER_BG);
+        pos_x = rx - (int)strlen(pos_str) * FONT_W;
+        left_chars = (pos_x - 12) / FONT_W;
+        if (left_chars > 32) left_chars = 32;
+        if (left_chars < 0) left_chars = 0;
+        draw_str_n(6, 4, hdr_left, left_chars, COL_HDR_FG);
+        draw_str(pos_x, 4, pos_str, COL_HDR_FG);
     }
 
     /* Gutter & editor workspace */
@@ -2047,7 +2301,7 @@ static void render_edit_tab(void)
     px_rect(GUTTER_W, BODY_Y, GUTTER_W, FKEY_Y - 2, COL_BORDER);
     px_rect(GUTTER_W + 1, BODY_Y, VIS_W - 1, FKEY_Y - 2, COL_WHITE);
 
-    in_bc = block_comment_before_line(scroll_line);
+    in_bc = syntax_state_before_line(scroll_line);
     pos = pos_of_line(scroll_line);
 
     for (row = 0; row < EDIT_ROWS; row++) {
@@ -2089,7 +2343,7 @@ static void render_edit_tab(void)
                 draw_str(1, y + 1, lnum, COL_WHITE);
             } else draw_str(1, y + 1, lnum, COL_BLACK);
 
-            draw_code_line(y, ls, le, edit_lang, &in_bc);
+            syntax_scan_line(y, ls, le, edit_lang, &in_bc, 1);
 
             if (ln == cur_ln) {
                 int vis_c = cur_col - scroll_col;
@@ -2769,7 +3023,7 @@ static void leave_to_menu(void)
     Bkey_ClrAllFlags();
     EnableGetkeyToMainFunctionReturn();
     set_menu_return_flag(1);
-    DrawFrame(COL_WHITE);
+    DrawFrame(0xFFFF); /* OS border: physical white */
     drain_os_keys();
 
     if (os_menu) {
@@ -2796,14 +3050,14 @@ static void leave_to_menu(void)
         if (!menu_timer_fired) {
             px_rect(0, 0, VIS_W - 1, VIS_H - 1, COL_BLACK);
             draw_str(60, 96, "PRESS MENU KEY TO LEAVE", COL_WHITE);
-            Bdisp_PutDisp_DD();
+            present_frame();
             GetKeyWait_OS(&col, &row, KEYWAIT_HALTON_TIMERON, 3600, 0, &keycode);
         }
     }
 
     Bdisp_EnableColor(1);
     EnableStatusArea(3);
-    DrawFrame(COL_BLACK);
+    DrawFrame(0x0000); /* OS border: physical black */
     wait_all_released();
     drain_os_keys();
 }
@@ -2846,7 +3100,7 @@ static void run_pycedit_session(void)
         if (dirty_ui) {
             if (active_tab == TAB_FILES) render_files_tab();
             else render_edit_tab();
-            Bdisp_PutDisp_DD();
+            present_frame();
             dirty_ui = 0;
         }
 
@@ -2862,7 +3116,7 @@ int main(void)
 {
     Bdisp_EnableColor(1);
     EnableStatusArea(3);
-    DrawFrame(COL_BLACK);
+    DrawFrame(0x0000); /* OS border: physical black */
 
     vram = (unsigned short *)GetVRAMAddress();
     strcpy(cur_dir, SMEM_ROOT);

@@ -1,0 +1,70 @@
+{
+  "GraphLab": {
+    "filename": "GraphLab.g3a",
+    "old_file_sha256": "c7c336feed4696899f57276b3f2a606b02ede50e86160807b2465605dec5a9d1",
+    "new_file_sha256": "5face3051cf25ae459ee57022d268a83a5566414e8fb74622f4ad37c2f82623a",
+    "unchanged_masked_file_sha256": "43d593b1d399ab105834ea05cbb8771f7d20dd86148555a8863489d424fe9a50",
+    "payload_sha256": "d392d86a1b015068dfe4377881bc3f50e3f0caf7b185fb5c652d857556e8a04e",
+    "length": 238480,
+    "internal_id": "@GRAPHLAB",
+    "version": "01.09.0000",
+    "code_update": false,
+    "preserved_name_fields_sha256": "fbe95845f9545477f63f0fe24be250c87a977bcdafda059102803330aecaa9ad"
+  },
+  "Wireworld": {
+    "filename": "Wireworld.g3a",
+    "old_file_sha256": "27a2b27582e5a6d6401c402dd52449c313110daa718d882431519cf41c411782",
+    "new_file_sha256": "c6767fe9911911cbf7d1b962a9accefd22bff6337305c21c1879fb96f0678d04",
+    "unchanged_masked_file_sha256": "b81e6c7453b99edb456998014d92bc639fba9e90a1ab944a01b47577630de165",
+    "payload_sha256": "69176a2e2f03bce13d81b9c4fb085bb04aa879faff3a68ab5131666786b56a21",
+    "length": 96956,
+    "internal_id": "@WIREWORLD",
+    "version": "1.65",
+    "code_update": false,
+    "preserved_name_fields_sha256": "2963d65b8e4ca1780ed8531f31b02fb9e2dcc25e89af3ab635983d7fea52e616"
+  },
+  "PyCEdit": {
+    "filename": "PyCEdit.g3a",
+    "old_file_sha256": "8f2d61166a1877ca5ccbb2948262b9ad85feef326ebe4904867a5bf07861e233",
+    "new_file_sha256": "d6fbd8c62f38899cab4bdefc770b8a38f1454cf5695615f3351836ceeb308d1a",
+    "payload_sha256": "4976f6e75774486425eb554b378225de8afa3000c67b542df9f059342b192f23",
+    "length": 72312,
+    "internal_id": "@PYCEDIT",
+    "version": "01.15",
+    "code_update": true,
+    "previous_1_13_icon_file_sha256": "5cc532bf38568bb5b336417f96171b49bc28da98468145fa05f4a7859144dda4",
+    "previous_payload_sha256": "d4332094a7a1516a5175c8860622571dcd82761cc47d930ed07da8e89b690fba",
+    "display_name": "PyCEdit",
+    "previous_1_14_file_sha256": "42c01bb9ccbe2622c9a0c4f1b1036e05ef62f378eab6a89488bc52df5a4eb6cd",
+    "previous_name_fields_sha256": "ca45e04ecf378319a44c691cc86ef63ff722b70d79dd23a7132a0d699b545c9a",
+    "current_name_fields_sha256": "b59d5996ced786107cc5d3fbdc649bc4b9fa26e2cb2bcef205f5a302de10535d",
+    "previous_1_14_icon_sha256": {
+      "unselected": "0e3eec0d59a2000e2c5da7f8e34e53af9995e9ab30ab42a3f53a7ead190f971f",
+      "selected": "d1f8f5305d704d3d2d1c82963000ef67dc68de92836bf77889648e899c7db4b3"
+    }
+  },
+  "Translator": {
+    "filename": "Translator.g3a",
+    "old_file_sha256": "59856b401304f5d9bc2a9699ef13ea4373bcf655885b9b998558e1a1d24bbd71",
+    "new_file_sha256": "ff2299281c71070e8572997b5b558cdac198e281dcc22d00f75b10ccfecd04c7",
+    "unchanged_masked_file_sha256": "e1c82edf63d5f031c5e06fac3d91eaed15691ac5ba214e7ffdd44f628abb3d1e",
+    "payload_sha256": "e05b05e731be724ff2ce31aa5825bced8be7bcb6aa4644d3fef6e022e661c64e",
+    "length": 65328,
+    "internal_id": "@TRANS",
+    "version": "01.11",
+    "code_update": false,
+    "preserved_name_fields_sha256": "e90ef1f5373b5f86a3659fa9820e672cdd144fff469126fea65d787539e702aa"
+  },
+  "ObjView": {
+    "filename": "ObjView.g3a",
+    "old_file_sha256": "4c9b3f205f1381e700510cdfd85b47a28105aa5672615476905424326596176c",
+    "new_file_sha256": "437f5fe3585f9c6573e934a8f9de233b3ed6b5ac02074a711ba9566250414d97",
+    "unchanged_masked_file_sha256": "ead5dfcb44ac8c69d12cfadec3fcebcf871b3395f7f1242ad3de7f414cef5938",
+    "payload_sha256": "38a0bf4021e174fa89d6fe012fa0a1b80f9fa668462349f0bca9b39a408a5315",
+    "length": 102096,
+    "internal_id": "@OBJVIEW",
+    "version": "02.23.0000",
+    "code_update": false,
+    "preserved_name_fields_sha256": "ec1445304bf18fd774cd1884262f4549bd78c7f7707ba990bb6b169c5ea4531c"
+  }
+}

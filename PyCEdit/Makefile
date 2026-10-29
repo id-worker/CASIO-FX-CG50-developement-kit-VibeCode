@@ -6,12 +6,19 @@ endif
 
 include $(FXCGSDK)/toolchain/prizm_rules
 
-TARGET   := PyCEdit
-BUILD    := build
+# Light-only configuration. Reject obsolete theme arguments explicitly.
+THEME ?= light
+ifneq ($(THEME),light)
+$(error PyCEdit is now light-only: use make or make THEME=light)
+endif
+TARGET := PyCEdit
+BASIC_NAME := PyCEdit
+INTERNAL_NAME := PYCEDIT
+BUILD    := build-light
 SOURCES  := src
 INCLUDES :=
 
-MKG3AFLAGS := -V 01.12 -n basic:PyCEdit -n internal:@PYCEDIT \
+MKG3AFLAGS := -V 01.15 -n basic:$(BASIC_NAME) -n internal:$(INTERNAL_NAME) \
               -i uns:../unselected.bmp -i sel:../selected.bmp
 
 CFLAGS   = -std=gnu99 -Os -Wall $(MACHDEP) $(INCLUDE) -ffunction-sections -fdata-sections
@@ -63,9 +70,9 @@ else
 
 DEPENDS := $(OFILES:.o=.d)
 
-$(OUTPUT).g3a: $(OUTPUT).bin
+$(OUTPUT).g3a: $(OUTPUT).bin ../unselected.bmp ../selected.bmp ../tools/fix_g3a.py
 	$(MKG3A) $(MKG3AFLAGS) $< $@
-	python3 ../tools/fix_g3a.py $@
+	python3 ../tools/fix_g3a.py $@ --icons ../unselected.bmp ../selected.bmp
 $(OUTPUT).bin: $(OFILES)
 
 -include $(DEPENDS)

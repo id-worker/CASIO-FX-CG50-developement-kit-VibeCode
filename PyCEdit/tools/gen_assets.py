@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """
-Generates:
-  1. src/font6x10.h  -- crisp 6x10 monospace bitmap font (ASCII 32..126)
-  2. unselected.bmp  -- 92x64 24-bit BMP icon for Casio Main Menu
-  3. selected.bmp    -- 92x64 24-bit BMP icon (highlighted)
+Generates src/font6x10.h, a crisp 6x10 monospace bitmap font (ASCII 32..126).
+Menu icon generation is handled by gen_theme_icons.py; this script does not
+change the selected/unselected BMP files.
 """
 import os
-import struct
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.makedirs(os.path.join(ROOT, "src"), exist_ok=True)
@@ -164,85 +162,4 @@ with open(font_path, "w") as f:
     f.write("\n".join(lines) + "\n")
 print("Wrote", font_path)
 
-# Generate 92x64 24-bit BMP icons in PythonExtra black/white/blue/amber style
-W, H = 92, 64
-
-def draw_text_on_canvas(canvas, x0, y0, text, color, scale=1):
-    for idx, ch in enumerate(text):
-        c = ord(ch)
-        if 32 <= c <= 126:
-            glyph = RAW_FONT[c]
-            for ry in range(10):
-                for rx in range(6):
-                    if glyph[ry][rx] == '#':
-                        for sy in range(scale):
-                            for sx in range(scale):
-                                px = x0 + idx * 6 * scale + rx * scale + sx
-                                py = y0 + ry * scale + sy
-                                if 0 <= px < W and 0 <= py < H:
-                                    canvas[py][px] = color
-
-def write_bmp(path, selected):
-    bg = (255, 255, 255) if selected else (242, 245, 249)
-    hdr_bg = (15, 23, 42) if not selected else (0, 72, 184)
-    border = (0, 0, 0)
-    canvas = [[bg for _ in range(W)] for _ in range(H)]
-
-    # Outer border
-    for x in range(W):
-        canvas[0][x] = border
-        canvas[H - 1][x] = border
-    for y in range(H):
-        canvas[y][0] = border
-        canvas[y][W - 1] = border
-
-    # PythonExtra-style dark top title bar (y = 1..15)
-    for y in range(1, 16):
-        for x in range(1, W - 1):
-            canvas[y][x] = hdr_bg
-
-    draw_text_on_canvas(canvas, 6, 4, "PyCEdit", (255, 255, 255), scale=1)
-
-    # Left pill: .py (blue/gold)  Right pill: .c (navy/cyan)
-    py_bg = (28, 100, 210) if selected else (55, 95, 160)
-    c_bg  = (18, 125, 70)  if selected else (45, 110, 75)
-    for y in range(20, 36):
-        for x in range(6, 43):
-            canvas[y][x] = py_bg
-        for x in range(49, 86):
-            canvas[y][x] = c_bg
-    draw_text_on_canvas(canvas, 15, 24, ".py", (255, 255, 255), scale=1)
-    draw_text_on_canvas(canvas, 59, 24, ".c", (255, 255, 255), scale=1)
-    # <-> arrow in middle
-    draw_text_on_canvas(canvas, 43, 24, "=", (40, 40, 40), scale=1)
-
-    # Stylized syntax-highlighted code lines at bottom
-    kw = (0, 72, 184)
-    st = (20, 122, 46)
-    cm = (130, 140, 155)
-    for y in (42, 43):
-        for x in range(8, 26): canvas[y][x] = kw
-        for x in range(30, 62): canvas[y][x] = (40, 45, 55)
-    for y in (48, 49):
-        for x in range(16, 42): canvas[y][x] = st
-        for x in range(46, 78): canvas[y][x] = cm
-    for y in (54, 55):
-        for x in range(16, 54): canvas[y][x] = kw
-
-    raw_rows = []
-    for y in range(H - 1, -1, -1):
-        row = bytearray()
-        for x in range(W):
-            r, g, b = canvas[y][x]
-            row += bytes((b, g, r))
-        # 92 * 3 = 276 (already multiple of 4!)
-        raw_rows.append(bytes(row))
-    pixels = b"".join(raw_rows)
-    hdr = struct.pack("<2sIHHI", b"BM", 54 + len(pixels), 0, 0, 54)
-    dib = struct.pack("<IiiHHIIiiII", 40, W, H, 1, 24, 0, len(pixels), 0, 0, 0, 0)
-    with open(path, "wb") as f:
-        f.write(hdr + dib + pixels)
-    print(f"Wrote {path} ({54 + len(pixels)} bytes)")
-
-write_bmp(os.path.join(ROOT, "unselected.bmp"), False)
-write_bmp(os.path.join(ROOT, "selected.bmp"), True)
+# Menu BMP icons are generated separately by gen_theme_icons.py.

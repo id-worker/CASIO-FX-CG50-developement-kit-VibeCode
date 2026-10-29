@@ -5,7 +5,9 @@
 set -eu
 cd "$(dirname "$0")/.."
 newroot=$(pwd)
-oldroot=${PREVIOUS_ROOT:-"$(dirname "$(dirname "$newroot")")/GraphLab_fxCG50_v1.08"}
+# A minimal, licensed 1.08 storage fixture lives with these tests; override
+# PREVIOUS_ROOT to test another complete compatible version instead.
+oldroot=${PREVIOUS_ROOT:-"$newroot/tests/fixtures/GraphLab_1.08"}
 test -f "$oldroot/src/storage.c" || { echo "Set PREVIOUS_ROOT to the extracted previous GraphLab source." >&2; exit 1; }
 work=$(mktemp -d "${TMPDIR:-/tmp}/gl109-cross-XXXXXX")
 trap 'rm -rf "$work"' EXIT HUP INT TERM

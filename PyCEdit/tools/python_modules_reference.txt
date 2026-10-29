@@ -1,0 +1,29 @@
+# Import templates, not a list proven from the user's calculator.
+# Source: PythonExtra pe-0.4.0-beta tree edf141576844139277deda0b6d8b1ab969a9a68e,
+# ports/sh/mpconfigport.h (array, cmath, collections, gc, io, math, random,
+# struct, sys, time); release notes and port modules (gint, casioplot,
+# kandinsky, ion). MicroPython builtins/micropython are core modules.
+# The user's prebuilt binary has incomplete build provenance; presence and
+# function subsets may vary by version and need on-device checks.
+# [FILE] modules turtle and matplotl are distributed as separate .py files
+# in the upstream release; this editor does not install or contain them.
+# See https://git.planet-casio.com/Lephenixnoir/PythonExtra/releases
+# and https://www.cemetech.net/forum/viewtopic.php?p=315709 for stock Python.
+math COMMON
+random COMMON
+casioplot COMMON
+gint EXTRA
+kandinsky EXTRA
+ion EXTRA
+time EXTRA
+cmath EXTRA
+array EXTRA
+collections EXTRA
+gc EXTRA
+io EXTRA
+struct EXTRA
+sys EXTRA
+micropython EXTRA
+builtins EXTRA
+turtle FILE
+matplotl FILE

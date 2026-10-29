@@ -1,8 +1,8 @@
 Translator 1.11 — source and rebuilding (Linux)
 ================================================
 
-The installation files are provided separately; TDIC.DAT is unchanged from
-1.10 and is not duplicated in the small source archive.
+The installation files are in the repository's releases directory and the
+GitHub release; TDIC.DAT is unchanged from 1.10 and is in the parent directory.
 
 Own code: ../LICENSE. Dictionary: ../LICENSE_DATA.txt. Dependencies and
 notices: ../THIRD_PARTY_NOTICES.txt and ../licenses/.
@@ -14,7 +14,8 @@ Build the add-in:
   * Set FXCGSDK to the libfxcg directory and put the cross-compiler and
     mkg3a on PATH. From this source directory run: make
   * tools/fix_g3a.py is called automatically by make after mkg3a; it
-    finalizes both checksums. Verify using fxgxa -d Translator.g3a.
+    embeds the two BMP icons as RGB565 and finalizes both checksums. Changing
+    an icon triggers repackaging. Verify using fxgxa -d Translator.g3a.
 
 Rebuild the dictionary (requires Python 3):
   * Download/extract the original version 2025.11.23 TEI archives linked

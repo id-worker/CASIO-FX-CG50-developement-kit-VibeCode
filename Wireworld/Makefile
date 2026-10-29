@@ -88,9 +88,9 @@ else
 
 DEPENDS := $(OFILES:.o=.d)
 
-$(OUTPUT).g3a: $(OUTPUT).bin
+$(OUTPUT).g3a: $(OUTPUT).bin ../unselected.bmp ../selected.bmp ../tools/fix_g3a.py
 	$(MKG3A) $(MKG3AFLAGS) $< $@
-	python3 $(CURDIR)/../tools/fix_g3a.py $@
+	python3 ../tools/fix_g3a.py $@ --icons ../unselected.bmp ../selected.bmp
 
 $(OUTPUT).bin: $(OFILES)
 

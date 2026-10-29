@@ -30,15 +30,35 @@ static int active_find_handles = 0;
 static unsigned short host_vram_buf[VRAM_W * VIS_H];
 static int fake_ticks = 100;
 static int key_state[128];
+/* Optional hardware-matrix event script for the real modal palette loop. */
+static int scripted_keys[32], scripted_count, scripted_start, scripted_active;
 
 int host_key_down(int code)
 {
+    if (scripted_active) {
+        int elapsed = fake_ticks - scripted_start;
+        int i;
+        for (i = 0; i < scripted_count; i++) {
+            int t0 = 20 + i * 60;
+            if (code == scripted_keys[i] && elapsed >= t0 && elapsed < t0 + 20)
+                return 1;
+        }
+        return 0;
+    }
     if (code >= 0 && code < 128) return key_state[code];
     return 0;
 }
 
-void Bdisp_PutDisp_DD(void) {}
-void OS_InnerWait_ms(int ms) { fake_ticks += (ms > 0 ? ms : 1); }
+static int last_color_mode = -1, color_enables = 0, frame_presents = 0;
+void Bdisp_EnableColor(int mode) { last_color_mode = mode; color_enables++; }
+void Bdisp_PutDisp_DD(void) { assert(last_color_mode == 1); frame_presents++; last_color_mode = -1; }
+void OS_InnerWait_ms(int ms) {
+    fake_ticks += (ms > 0 ? ms : 1);
+    if (scripted_active && fake_ticks - scripted_start > 20 + scripted_count * 60 + 300) {
+        fprintf(stderr, "palette event script exhausted\n");
+        abort();
+    }
+}
 int  RTC_GetTicks(void) { return fake_ticks; }
 int  RTC_Elapsed_ms(int start, int dur) { return (fake_ticks - start) * 8 >= dur; }
 void host_leave_to_menu(void) {}
@@ -282,6 +302,8 @@ static void tap_key_in_edit(int k)
     poll_editor_key(&mc); /* completes release cleanly */
 }
 
+#include "test_syntax_palette.h"
+
 int main(void)
 {
     vram = host_vram_buf;
@@ -479,6 +501,10 @@ int main(void)
         assert(strcmp(edit_buf, orig_hello) == 0);
     }
 
+    test_syntax_rendering();
+    test_render_fuzz_and_guards();
+    test_include_catalog();
+    test_pymodule_catalog();
     printf("ALL PyCEdit host assertions PASSED!\n");
     return 0;
 }
