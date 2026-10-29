@@ -81,6 +81,8 @@ void host_putdisp(void)
 /* script                                                              */
 /* ------------------------------------------------------------------ */
 extern int host_timers_installed(void);
+extern unsigned host_drawframe_count(void);
+extern void host_set_clock_ms(long value);
 
 /* after the restart the add-in has to be left again the way a user does
    it: EXIT, then EXE on the confirmation */
@@ -203,6 +205,23 @@ static int expected_cursor_px(void)
 /* ------------------------------------------------------------------ */
 static int field_index_at_start = -1;
 static int speed_at_start = -1;
+static long idle_frames_before, run_frames_before, auto_frames_before;
+static unsigned idle_border_before;
+
+static void chk_idle(const char *name)
+{
+    long redraws = frames - idle_frames_before;
+    unsigned borders = host_drawframe_count() - idle_border_before;
+    ok(redraws <= 1, name, "idle screen redrew %ld times", redraws);
+    ok(borders >= 3, name, "physical frame refreshed only %u times", borders);
+    printf("  idle 900 ms: %ld screen refreshes, %u border refreshes\n", redraws, borders);
+}
+
+static void chk_run_start(const char *name)
+{
+    (void)name;
+    run_frames_before = frames;
+}
 
 static void chk_start(const char *name)
 {
@@ -217,6 +236,11 @@ static void chk_start(const char *name)
     ok(count_px(0, HDR_H - 1, COL_HDRBG) > 1000, name,
        "no header background");
     ok(count_px(HDR_H, 215, COL_HDRBG) == 0, name, "header spills into the grid");
+    ok(count_px(grid_top, 215, COL_WIRE) > 10, name, "starting demo is offscreen");
+    ok(count_px(grid_top, 215, COL_HEAD) > 0, name, "demo heads are offscreen");
+    ok(free_heap_kb() > 0, name, "free-heap probe reported zero");
+    idle_frames_before = frames;
+    idle_border_before = host_drawframe_count();
     printf("  start: field %dx%d, view %dx%d, cell %d px, HDR %d px\n",
            world.w, world.h, view_w, view_h, cell_px, HDR_H);
 }
@@ -239,8 +263,10 @@ static void chk_running(const char *name)
     ok(running == 1, name, "the simulation is not running");
     ok(world.gen > 5, name, "only %lu generations in 2.5 s", world.gen);
     ok(ips_measured > 0, name, "the speed was not measured");
-    printf("  running: %lu generations, %d/s measured\n", world.gen,
-           ips_measured);
+    ok(frames - run_frames_before <= 90, name,
+       "too many display refreshes while running: %ld", frames - run_frames_before);
+    printf("  running: %lu generations, %d/s measured, %ld refreshes in 2.5 s\n", world.gen,
+           ips_measured, frames - run_frames_before);
 }
 
 static void chk_paused(const char *name)
@@ -514,10 +540,11 @@ static void chk_menu_closed(const char *name)
 static void chk_help_open(const char *name)
 {
     int box = count_px(0, 215, COL_BOXBG);
-    int border_top = count_px(2, 2, COL_BOXFG);
+    int border_top = count_px(2, 2, COL_BOXEDGE);
     int bottom = box_bottom(2, HELP_LINES);
-    int border_bot = count_px(bottom, bottom, COL_BOXFG);
+    int border_bot = count_px(bottom, bottom, COL_BOXEDGE);
     int below = count_px(bottom + 3, 215, COL_BOXFG)
+              + count_px(bottom + 3, 215, COL_BOXEDGE)
               + count_px(bottom + 3, 215, COL_BOXBG);
     cur_check = name; (void)cur_check;
     ok(box > 5000, name, "help box is only %d px", box);
@@ -709,9 +736,9 @@ static void chk_menu_back_clean(const char *name)
        "menu COL_BOXBG left on screen (%d px)", count_px(0, 215, COL_BOXBG));
     ok(count_px(0, 215, COL_BOXSEL) == 0, name,
        "menu COL_BOXSEL left on screen (%d px)", count_px(0, 215, COL_BOXSEL));
-    ok(count_px(212, 215, COL_BOXFG) == 0, name,
+    ok(count_px(212, 215, COL_BOXEDGE) == 0, name,
        "menu border left in bottom remainder strip (%d px)",
-       count_px(212, 215, COL_BOXFG));
+       count_px(212, 215, COL_BOXEDGE));
     ok(ww_get(&world, cur_x, cur_y) == WW_EMPTY, name,
        "closing menu with EXE accidentally painted under cursor");
     printf("  menu close: zero leftover pixels after BACK TO THE FIELD & remainder strip\n");
@@ -726,16 +753,118 @@ static void chk_final(const char *name)
     ok(count_px(0, 215, COL_PREVIEW) == 0, name, "preview left over");
 }
 
+static void chk_demo_visible(const char *name)
+{
+    ok(pat_index == 1, name, "F4 did not load the next demo (%d)", pat_index);
+    ok(count_px(grid_top, 215, COL_WIRE) > 10, name, "demo wires are offscreen");
+    ok(count_px(grid_top, 215, COL_HEAD) > 0, name, "demo head is offscreen");
+}
+
+static void chk_demo_tight_zoom(const char *name)
+{
+    int i;
+    zoom = ZOOM_COUNT - 1;
+    recalc_view();
+    for (i = 0; i < patternCount; i++) {
+        load_pattern(i);
+        toast_on = 0;
+        render_frame();
+        ok(count_px(grid_top, 215, COL_HEAD) > 0, name,
+           "demo %d head is offscreen at 8 px zoom", i);
+    }
+}
+
+static unsigned long slow_gen;
+static int slow_x;
+static void prepare_slow_run(const char *name)
+{
+    (void)name;
+    load_pattern(0);
+    speed = 0; /* one generation per second */
+    running = 0;
+}
+
+static void chk_slow_started(const char *name)
+{
+    ok(running, name, "did not start at 1/s");
+    ok(world.gen == 1, name, "expected immediate first generation, got %lu", world.gen);
+    slow_gen = world.gen;
+    slow_x = cur_x;
+}
+
+static void chk_slow_move(const char *name)
+{
+    ok(running, name, "simulation paused while moving");
+    ok(cur_x == wrap(slow_x + 1, world.w), name, "cursor did not respond at 1/s");
+    ok(world.gen == slow_gen, name, "ran another generation too early at 1/s");
+}
+
+static void chk_slow_speed(const char *name)
+{
+    ok(running && speed == 1, name, "F5 did not change speed while running");
+}
+
+static void chk_slow_pause(const char *name)
+{
+    ok(!running, name, "F1 did not pause promptly at slow speed");
+}
+
+static unsigned midnight_border;
+static void prepare_midnight(const char *name)
+{
+    (void)name;
+    host_set_clock_ms(86400000L - 200);
+    load_pattern(0);
+    speed = 0;
+    running = 0;
+    slow_x = cur_x;
+    midnight_border = host_drawframe_count();
+}
+
+static void chk_midnight(const char *name)
+{
+    ok(RTC_GetTicks() < 128, name, "test did not cross midnight");
+    ok(running && world.gen == 1, name, "simulation stalled or ran too fast across midnight");
+    ok(host_drawframe_count() > midnight_border, name, "border did not refresh across midnight");
+}
+
+static void chk_midnight_move(const char *name)
+{
+    ok(running && cur_x == wrap(slow_x + 1, world.w), name,
+       "cursor did not respond just after midnight");
+}
+
+static void prepare_autostop(const char *name)
+{
+    (void)name;
+    ww_clear(&world);
+    running = 0;
+    toast_on = 0;
+    mark_all();
+    render_frame();
+    auto_frames_before = frames;
+    running = 1;
+}
+
+static void chk_autostop(const char *name)
+{
+    ok(!running, name, "static world did not stop");
+    ok(toast_on && strcmp(toast_msg, "NOTHING MOVES - PRESS F1") == 0, name,
+       "automatic-stop message missing");
+    ok(frames > auto_frames_before, name, "automatic-stop message was not displayed");
+}
+
 /* ------------------------------------------------------------------ */
 #define S(k, h, c, n) { k, h, c, n }
 static const Step steps[] = {
     S(0,                2100, chk_start,        "start"),
+    S(0,                 900, chk_idle,         "idle"),
     S(KEY_PRGM_RIGHT,    900, chk_trail,        "hold right"),
     S(KEY_PRGM_RIGHT,    900, chk_trail,        "hold right again"),
     S(KEY_PRGM_LEFT,     600, chk_trail,        "hold left"),
     S(KEY_PRGM_UP,       600, chk_trail,        "hold up"),
 
-    S(KEY_PRGM_F1,       120, NULL,             "run"),
+    S(KEY_PRGM_F1,       120, chk_run_start,    "run"),
     S(0,                2500, chk_running,      "running"),
     S(KEY_PRGM_F1,       120, NULL,             "pause"),
     S(0,                 300, chk_paused,       "paused"),
@@ -882,7 +1011,21 @@ static const Step steps[] = {
     S(KEY_PRGM_7,        120, NULL,             "zoom 3"),
     S(KEY_PRGM_7,        120, NULL,             "zoom 2"),
 
-    S(0,                 250, chk_final,        "final")
+    S(0,                 250, chk_final,        "final"),
+    S(KEY_PRGM_F4,       120, chk_demo_visible, "next demo focus"),
+    S(0,                 120, chk_demo_tight_zoom, "demo focus at zoom 8"),
+    S(0,                 100, prepare_slow_run, "prepare 1/s"),
+    S(KEY_PRGM_F1,        80, chk_slow_started, "start 1/s"),
+    S(KEY_PRGM_RIGHT,     80, chk_slow_move, "move at 1/s"),
+    S(KEY_PRGM_F5,        80, chk_slow_speed, "speed while running"),
+    S(KEY_PRGM_F1,        80, chk_slow_pause, "pause at slow speed"),
+    S(0,                 100, prepare_midnight, "prepare midnight"),
+    S(KEY_PRGM_F1,        80, NULL, "start before midnight"),
+    S(0,                 220, chk_midnight, "running across midnight"),
+    S(KEY_PRGM_RIGHT,     80, chk_midnight_move, "move after midnight"),
+    S(KEY_PRGM_F1,        80, chk_slow_pause, "pause after midnight"),
+    S(0,                 120, prepare_autostop, "prepare automatic stop"),
+    S(0,                 200, chk_autostop,     "automatic stop")
 };
 #undef S
 

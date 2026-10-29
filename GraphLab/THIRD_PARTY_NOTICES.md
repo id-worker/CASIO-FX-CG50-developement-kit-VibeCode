@@ -1,4 +1,4 @@
-# Third-party notices for GraphLab 1.06
+# Third-party notices for GraphLab 1.07
 
 GraphLab's original application sources, tests and icons are covered by the
 project's `LICENSE` (MIT). The linked libraries and toolchain components below

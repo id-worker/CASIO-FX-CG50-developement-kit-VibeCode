@@ -32,11 +32,11 @@ int main(void)
     assert(storage_load(&readback)==1 && !strcmp(readback.curve[0].formula,"y=sin(x)"));
     assert(storage_save(&b)==-2); /* failed partial slot is not silently destroyed */
     int after=fd_count();if(before>=0 && after>=0)assert(before==after);
-    char p[256];snprintf(p,sizeof p,"%s/GLAB3_B.DAT",dir);assert(unlink(p)==0);
+    char p[256];snprintf(p,sizeof p,"%s/GLAB4_B.DAT",dir);assert(unlink(p)==0);
     assert(storage_save(&b)==0); /* now two valid records exist */
     failure_budget=64;assert(storage_save(&a)==-1);failure_budget=-1;
     assert(storage_load(&readback)==1 && !strcmp(readback.curve[0].formula,"y=x"));
     if(before>=0 && fd_count()>=0)assert(before==fd_count());
-    snprintf(p,sizeof p,"%s/GLAB3_A.DAT",dir);unlink(p);snprintf(p,sizeof p,"%s/GLAB3_B.DAT",dir);unlink(p);rmdir(dir);
+    snprintf(p,sizeof p,"%s/GLAB4_A.DAT",dir);unlink(p);snprintf(p,sizeof p,"%s/GLAB4_B.DAT",dir);unlink(p);rmdir(dir);
     puts("Injected partial-write failures preserve the previous save and close file descriptors.");
 }

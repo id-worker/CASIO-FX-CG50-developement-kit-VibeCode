@@ -43,14 +43,14 @@
 #define COL_WHITE       0xFFFF
 #define COL_HDR_BG      0x0000
 #define COL_HDR_FG      0xFFFF
-#define COL_GUTTER_BG   RGB565(241, 243, 246)
-#define COL_GUTTER_FG   RGB565(130, 140, 155)
-#define COL_GUTTER_CUR  RGB565(30,  60,  120)
-#define COL_BORDER      RGB565(205, 212, 222)
-#define COL_CURLINE     RGB565(235, 243, 255)
-#define COL_SEL_BG      RGB565(180, 213, 255)
-#define COL_SEL_ROW     RGB565(24,  33,  47)
-#define COL_CURSOR      RGB565(0,   80,  208)
+#define COL_GUTTER_BG   COL_WHITE
+#define COL_GUTTER_FG   COL_BLACK
+#define COL_GUTTER_CUR  COL_BLACK
+#define COL_BORDER      COL_BLACK
+#define COL_CURLINE     COL_WHITE
+#define COL_SEL_BG      COL_WHITE
+#define COL_SEL_ROW     COL_BLACK
+#define COL_CURSOR      COL_BLACK
 
 /* Syntax highlighting colors (readable on white LCD) */
 #define SYN_NORMAL      RGB565(24,  28,  34)
@@ -62,13 +62,13 @@
 #define SYN_OP          RGB565(70,  80,  95)
 
 /* Badges */
-#define COL_BADGE_PY    RGB565(28,  100, 210)
-#define COL_BADGE_C     RGB565(18,  130, 72)
-#define COL_BADGE_DIR   RGB565(90,  100, 120)
-#define COL_BADGE_MOD   RGB565(230, 140, 0)
-#define COL_BADGE_ALP   RGB565(40,  150, 70)
-#define COL_TOAST_BG    RGB565(20,  28,  40)
-#define COL_MODAL_DIM   RGB565(225, 230, 238)
+#define COL_BADGE_PY    COL_BLACK
+#define COL_BADGE_C     COL_BLACK
+#define COL_BADGE_DIR   COL_BLACK
+#define COL_BADGE_MOD   COL_BLACK
+#define COL_BADGE_ALP   COL_BLACK
+#define COL_TOAST_BG    COL_BLACK
+#define COL_MODAL_DIM   COL_WHITE
 
 /* ------------------------------------------------------------------ */
 /* Casio fx-CG50 PRGM Matrix Keycodes (col*10 + row)                   */
@@ -633,6 +633,7 @@ static void draw_mod_badge(int right_x)
     if (!txt) return;
 
     px_rect(right_x - 24, 2, right_x, HDR_H - 3, bg);
+    px_box(right_x - 24, 2, right_x, HDR_H - 3, COL_WHITE);
     draw_str(right_x - 21, 4, txt, COL_WHITE);
 }
 
@@ -981,7 +982,7 @@ static int modal_confirm(const char *title, const char *line1, const char *line2
         px_box(34, 58, 349, 146, COL_BLACK);
         px_rect(35, 59, 348, 76, COL_BLACK);
         draw_str_n(42, 63, title, 48, COL_WHITE);
-        if (line1) draw_str_n(44, 86, line1, 48, SYN_NORMAL);
+        if (line1) draw_str_n(44, 86, line1, 48, COL_BLACK);
         if (line2) draw_str_n(44, 102, line2, 48, COL_GUTTER_FG);
         draw_str(44, 124, "EXE/F1 = Yes    EXIT/F6 = Cancel", COL_BADGE_PY);
         draw_fkeys(fk, 1);
@@ -1714,8 +1715,8 @@ static void open_symbol_palette(void)
                 int y1 = 50 + i * 16;
                 int is_s = (i == sel);
                 if (is_s) px_rect(24, y1, 359, y1 + 14, COL_SEL_ROW);
-                draw_char(28, y1 + 2, (char)('1' + i), is_s ? COL_BADGE_MOD : COL_GUTTER_FG);
-                draw_str_n(42, y1 + 2, lbls[i], 50, is_s ? COL_WHITE : SYN_NORMAL);
+                draw_char(28, y1 + 2, (char)('1' + i), is_s ? COL_WHITE : COL_BLACK);
+                draw_str_n(42, y1 + 2, lbls[i], 50, is_s ? COL_WHITE : COL_BLACK);
             }
         }
 
@@ -1815,11 +1816,11 @@ static void open_clip_menu(void)
         px_box(26, 38, 357, 174, COL_BLACK);
         px_rect(27, 39, 356, 56, COL_BLACK);
         draw_str(36, 43, "Select & Clipboard (VARS = quick SEL)", COL_WHITE);
-        draw_str(36, 62,  "F1: Start Select at cursor (move arrows)", SYN_KEYWORD);
-        draw_str(36, 76,  "F2: Select ALL file   F3: Select Line", SYN_KEYWORD);
+        draw_str(36, 62,  "F1: Start Select at cursor (move arrows)", COL_BLACK);
+        draw_str(36, 76,  "F2: Select ALL file   F3: Select Line", COL_BLACK);
         draw_str(36, 92,  clip_len > 0 ? "F4: Paste clipboard at cursor"
-                                       : "F4: Paste (clipboard is empty)", SYN_NORMAL);
-        draw_str(36, 106, "F5: Duplicate line    F6: Delete line", SYN_NORMAL);
+                                       : "F4: Paste (clipboard is empty)", COL_BLACK);
+        draw_str(36, 106, "F5: Duplicate line    F6: Delete line", COL_BLACK);
         draw_str(36, 122, "1: Copy line   2: Cut line   EXIT: Close", COL_GUTTER_FG);
         draw_str(36, 138, "In [SEL]: F1=Copy F2=Cut F4=Indent DEL=Erase", COL_BADGE_C);
         draw_str(36, 152, "Shortcut: VARS = Select, SHIFT+VARS = All", COL_GUTTER_FG);
@@ -1896,14 +1897,14 @@ static void open_help_card(void)
         px_rect(15, 25, 368, 42, COL_BLACK);
         draw_str(24, 29, "PyCEdit -- PythonExtra Keymap Cheat-Sheet", COL_WHITE);
 
-        draw_str(24, 48,  "ALPHA x1 = [alp] 1 char   ALPHA x2 = [aLK] lock", SYN_KEYWORD);
-        draw_str(24, 62,  "SHIFT+ALPHA = [ALP] upper  F5 = cycle num/aLK/ALK", SYN_KEYWORD);
+        draw_str(24, 48,  "ALPHA x1 = [alp] 1 char   ALPHA x2 = [aLK] lock", COL_BLACK);
+        draw_str(24, 62,  "SHIFT+ALPHA = [ALP] upper  F5 = cycle num/aLK/ALK", COL_BLACK);
         draw_str(24, 78,  "VARS = Select [SEL]   SHIFT+VARS = Select All!", COL_BADGE_C);
-        draw_str(24, 92,  "SHIFT + * / + -   ->   {  }  [  ]", SYN_NORMAL);
-        draw_str(24, 106, "SHIFT + 0 . ,     ->   :  =  ;", SYN_NORMAL);
-        draw_str(24, 120, "SHIFT + ( ) EXP   ->   <  >  !", SYN_NORMAL);
-        draw_str(24, 134, "SHIFT + (-) ->    ->   #  '   (^=&  x^2=|)", SYN_NORMAL);
-        draw_str(24, 148, "Normal: ( ) , = [->]   _ [(-)]   ^ [^]", SYN_NORMAL);
+        draw_str(24, 92,  "SHIFT + * / + -   ->   {  }  [  ]", COL_BLACK);
+        draw_str(24, 106, "SHIFT + 0 . ,     ->   :  =  ;", COL_BLACK);
+        draw_str(24, 120, "SHIFT + ( ) EXP   ->   <  >  !", COL_BLACK);
+        draw_str(24, 134, "SHIFT + (-) ->    ->   #  '   (^=&  x^2=|)", COL_BLACK);
+        draw_str(24, 148, "Normal: ( ) , = [->]   _ [(-)]   ^ [^]", COL_BLACK);
         draw_str(24, 164, "SHIFT+Arrows = PageUp/Down & Home/End", COL_GUTTER_FG);
         draw_str(24, 176, "FILES tab: F4 switches .py <-> .c in 1 press!", COL_BADGE_PY);
 
@@ -1936,7 +1937,7 @@ static void render_files_tab(void)
     draw_str_n(6, 4, hdr, 40, COL_HDR_FG);
 
     sprintf(rinfo, "[%s] %d", filter_code_only ? "py/c" : "ALL", dir_count);
-    draw_str(VIS_W - 6 - (int)strlen(rinfo) * FONT_W, 4, rinfo, COL_GUTTER_FG);
+    draw_str(VIS_W - 6 - (int)strlen(rinfo) * FONT_W, 4, rinfo, COL_WHITE);
 
     px_rect(0, BODY_Y, VIS_W - 1, FKEY_Y - 2, COL_WHITE);
 
@@ -1949,14 +1950,14 @@ static void render_files_tab(void)
             file_entry_t *e = &dir_items[idx];
             int y = BODY_Y + 4 + i * LINE_H;
             int sel = (idx == dir_sel);
-            unsigned short fg = sel ? COL_WHITE : SYN_NORMAL;
+            unsigned short fg = sel ? COL_WHITE : COL_BLACK;
 
             if (sel) px_rect(4, y - 1, VIS_W - 9, y + LINE_H - 2, COL_SEL_ROW);
 
             if (e->is_dir) {
                 char dname[96];
                 sprintf(dname, "[%s]", e->name);
-                draw_str_n(10, y, dname, 42, sel ? COL_WHITE : SYN_KEYWORD);
+                draw_str_n(10, y, dname, 42, sel ? COL_WHITE : COL_BLACK);
                 draw_str(VIS_W - 44, y, "<DIR>", sel ? COL_GUTTER_BG : COL_GUTTER_FG);
             } else {
                 int lang = detect_lang(e->name);
@@ -2034,6 +2035,7 @@ static void render_edit_tab(void)
         }
         if (sel_on) {
             px_rect(rx - 24, 2, rx, HDR_H - 3, COL_BADGE_PY);
+            px_box(rx - 24, 2, rx, HDR_H - 3, COL_WHITE);
             draw_str(rx - 21, 4, "SEL", COL_WHITE);
             rx -= 30;
         }
@@ -2074,15 +2076,18 @@ static void render_edit_tab(void)
                     if (c0 < 0) c0 = 0;
                     if (c1 > CODE_COLS) c1 = CODE_COLS;
                     if (c0 < c1) {
-                        px_rect(CODE_X + c0 * FONT_W, y,
-                                CODE_X + c1 * FONT_W - 1, y + LINE_H - 1,
-                                COL_SEL_BG);
+                        px_box(CODE_X + c0 * FONT_W, y,
+                               CODE_X + c1 * FONT_W - 1, y + LINE_H - 1,
+                               COL_BLACK);
                     }
                 }
             }
 
             fmt_lnum4(lnum, ln + 1);
-            draw_str(1, y + 1, lnum, (ln == cur_ln) ? COL_GUTTER_CUR : COL_GUTTER_FG);
+            if (ln == cur_ln) {
+                px_rect(0, y, GUTTER_W - 1, y + LINE_H - 1, COL_BLACK);
+                draw_str(1, y + 1, lnum, COL_WHITE);
+            } else draw_str(1, y + 1, lnum, COL_BLACK);
 
             draw_code_line(y, ls, le, edit_lang, &in_bc);
 

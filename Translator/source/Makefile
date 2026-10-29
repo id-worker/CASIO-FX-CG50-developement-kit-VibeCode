@@ -1,7 +1,7 @@
 .SUFFIXES:
 
 ifeq ($(strip $(FXCGSDK)),)
-export FXCGSDK := /var/tmp/pt/libfxcg
+export FXCGSDK := $(HOME)/PrizmSDK
 endif
 
 include $(FXCGSDK)/toolchain/prizm_rules
@@ -11,7 +11,7 @@ BUILD    := build
 SOURCES  := src
 INCLUDES :=
 
-MKG3AFLAGS := -V 01.10 -n basic:Translator -n internal:TRANS \
+MKG3AFLAGS := -V 01.11 -n basic:Translator -n internal:TRANS \
               -i uns:../unselected.bmp -i sel:../selected.bmp
 
 CFLAGS   = -std=gnu99 -Os -Wall $(MACHDEP) $(INCLUDE) -ffunction-sections \
@@ -19,7 +19,12 @@ CFLAGS   = -std=gnu99 -Os -Wall $(MACHDEP) $(INCLUDE) -ffunction-sections \
            -DMINIZ_NO_ARCHIVE_APIS -DMINIZ_NO_ARCHIVE_WRITING_APIS -DNDEBUG
 CXXFLAGS = $(CFLAGS) -fno-exceptions -fno-rtti
 LDFLAGS  = $(MACHDEP) -T../prizm.x -Wl,-static -Wl,-gc-sections
+GCCLIB   := $(shell $(CC) $(MACHDEP) -print-file-name=libgcc_be.a 2>/dev/null)
+ifeq ($(GCCLIB),libgcc_be.a)
+LIBS     := -Wl,--start-group -lc -lfxcg -lgcc -Wl,--end-group
+else
 LIBS     := -Wl,--start-group -lc -lfxcg -lgcc_be -Wl,--end-group
+endif
 
 ifneq ($(BUILD),$(notdir $(CURDIR)))
 

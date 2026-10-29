@@ -4,13 +4,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-static int aligned_period(Program const *pr,PlaneView const *v,int width)
+static int aligned_period(Program const *pr,EvalVars const *base,PlaneView const *v,int width)
 {
     if(!expr_program_uses(pr,V_X))return 1;
     float dx=(v->xmax-v->xmin)/(width-1);
     if(!isfinite(v->period_x)||v->period_x<=0||!isfinite(dx)||dx<=0)return 0;
     float steps=v->period_x/dx;
-    if(!isfinite(steps)||steps<1||steps>width-1)return 0;
+    if(!isfinite(steps)||steps<1||steps>width-1||!expr_proves_x_period(pr,base,v->period_x))return 0;
     int count=(int)lroundf(steps);
     return fabsf(steps-count)<=.000001f?count:0;
 }
@@ -64,17 +64,19 @@ static int clip_y(float x0,float y0,float x1,float y1,PlaneView const *v,
     if(*by>v->ymax)*by=v->ymax;
     return isfinite(*ax)&&isfinite(*ay)&&isfinite(*bx)&&isfinite(*by);
 }
-int plot_explicit_y(Program const *rhs,Relation relation,EvalVars const *base,
+int plot_explicit_y_cached(Program const *rhs,Relation relation,EvalVars const *base,
                     PlaneView const *view,int width,int height,
                     SegmentFn segment,void *segment_ctx,SpanFillFn fill,void *fill_ctx,
-                    ProgressFn progress,void *progress_ctx,PlotStats *stats)
+                    ProgressFn progress,void *progress_ctx,PlotStats *stats,
+                    float *cached,unsigned char *known,int offset,int capacity)
 {
     if(!rhs||!base||!view||!segment||!stats||width<2||width>400||height<2||height>250||
        !isfinite(view->xmin)||!isfinite(view->xmax)||!isfinite(view->ymin)||!isfinite(view->ymax)||
        view->xmin>=view->xmax||view->ymin>=view->ymax||expr_program_uses(rhs,V_Y)||
-       relation<REL_EQ||relation>REL_GE)return -1;
+       relation<REL_EQ||relation>REL_GE||
+       ((cached||known)&&(!cached||!known||offset<0||capacity<width||offset>capacity-width)))return -1;
     memset(stats,0,sizeof *stats);stats->all_zero=1;
-    int period=aligned_period(rhs,view,width);
+    int period=aligned_period(rhs,base,view,width);
     float *cache=period?malloc((size_t)width*sizeof(float)):NULL;
     if(period&&!cache)period=0; /* Optional optimization only. */
     EvalVars vars=*base;float prev=0,prev_x=0;int prev_valid=0;
@@ -84,9 +86,11 @@ int plot_explicit_y(Program const *rhs,Relation relation,EvalVars const *base,
             stats->canceled=1;free(cache);return 0;
         }
         float wx=view->xmin+dx*x,y;
-        if(period && x>=period)y=cache[x-period];
+        if(cached&&known[offset+x])y=cached[offset+x];
+        else if(period && x>=period)y=cache[x-period];
         else {vars.v[V_X]=wx;y=expr_eval_real(rhs,&vars);stats->evaluations++;}
         if(period)cache[x]=y;
+        if(cached){cached[offset+x]=y;known[offset+x]=1;}
         stats->samples++;
         if(!isfinite(y)){stats->invalid++;prev_valid=0;continue;}
         if(y!=0)stats->all_zero=0;
@@ -111,4 +115,13 @@ int plot_explicit_y(Program const *rhs,Relation relation,EvalVars const *base,
     }
     if(progress && !progress(width,width,progress_ctx)){stats->canceled=1;free(cache);return 0;}
     free(cache);return 1;
+}
+
+int plot_explicit_y(Program const *rhs,Relation relation,EvalVars const *base,
+                    PlaneView const *view,int width,int height,
+                    SegmentFn segment,void *segment_ctx,SpanFillFn fill,void *fill_ctx,
+                    ProgressFn progress,void *progress_ctx,PlotStats *stats)
+{
+    return plot_explicit_y_cached(rhs,relation,base,view,width,height,segment,segment_ctx,
+                                  fill,fill_ctx,progress,progress_ctx,stats,NULL,NULL,0,0);
 }

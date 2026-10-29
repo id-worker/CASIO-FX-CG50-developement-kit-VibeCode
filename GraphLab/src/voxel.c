@@ -42,12 +42,12 @@ static float field_at(Field *f,float x,float y,float z)
     if(!isfinite(q)){f->stats->invalid++;return NAN;}
     return f->implicit?q:z-q;
 }
-static int x_period(Program const *p,float period,float step,int n)
+static int x_period(Program const *p,EvalVars const *base,float period,float step,int n)
 {
     if(!expr_program_uses(p,V_X))return 1;
     if(!isfinite(period)||period<=0||!isfinite(step)||step<=0)return 0;
     float k=period/step;
-    if(!isfinite(k)||k<1||k>n)return 0;
+    if(!isfinite(k)||k<1||k>n||!expr_proves_x_period(p,base,period))return 0;
     int result=(int)lroundf(k);
     return fabsf(k-result)<=.000001f?result:0;
 }
@@ -75,7 +75,11 @@ static int build_surface(Renderer *r,Field *f,int si,ProgressFn progress,void *c
     int n=r->n,d=n+1;size_t plane=(size_t)d*d;
     float *memory=malloc(2*plane*sizeof(float));if(!memory)return -2;
     float *prev=memory,*next=memory+plane,step=2*r->v.radius/n;
-    int period=x_period(f->program,r->v.period_x,step,n);
+    int period=x_period(f->program,&f->vars,r->v.period_x,step,n);
+    /* A finite sign-changing edge of a proven continuous real expression
+       must contain a root. The pole heuristic used to reject real surface
+       cells in smooth trigonometric functions (including sin(x)+sin(y)+sin(z)). */
+    int continuous=expr_program_continuous(f->program);
     static const int corner[8][3]={{0,0,0},{1,0,0},{0,1,0},{1,1,0},
                                    {0,0,1},{1,0,1},{0,1,1},{1,1,1}};
     static const int edges[12][2]={{0,1},{2,3},{4,5},{6,7},{0,2},{1,3},
@@ -107,7 +111,7 @@ static int build_surface(Renderer *r,Field *f,int si,ProgressFn progress,void *c
                 }
                 r->stats->cells++;
                 if(!valid||(!zero&&!(neg&&pos)))continue;
-                if(!zero){
+                if(!zero&&!continuous){
                     int accepted=0;
                     for(int j=0;j<12;j++){
                         int a0=edges[j][0],b0=edges[j][1];
@@ -132,7 +136,7 @@ static int build_surface(Renderer *r,Field *f,int si,ProgressFn progress,void *c
 static int build_volume(Renderer *r,Field *f,int si,ProgressFn progress,void *ctx)
 {
     int n=r->n;float step=2*r->v.radius/n;
-    int period=x_period(f->program,r->v.period_x,step,n);
+    int period=x_period(f->program,&f->vars,r->v.period_x,step,n);
     float *row=period?malloc((size_t)n*sizeof(float)):NULL;
     if(period&&!row)period=0;
     for(int z=0;z<n;z++){
@@ -409,8 +413,30 @@ static void draw_voxel(Renderer *r,int x,int y,int z,int surface)
         if(good)face_pixels(r,screen,n,r->slots[surface-1],face/2);
     }
 }
-int voxel3d_render(RaySurface const *surfaces,int count,EvalVars const *base,
-                   Volume const *volume,Camera const *camera,
+/* Recover only visible points from the existing reciprocal depth buffer.
+   No formula evaluation and no second geometry representation is needed.
+   Saturated depth buckets cannot be reliably inverted and are skipped. */
+static void capture_preview(Renderer const *r,Preview3D *preview)
+{
+    if(!preview||!preview->point||!r->depth)return;
+    float focal=72.0f*2.8f*r->c.zoom;
+    for(int y=PLOT_Y0;y<=PLOT_Y1;y+=PREVIEW3D_STEP)for(int x=PLOT_X0;x<=PLOT_X1;x+=PREVIEW3D_STEP){
+        size_t at=(size_t)(y-PLOT_Y0)*PLOT_W+(x-PLOT_X0);uint16_t bucket=r->depth[at];
+        if(bucket<=1||bucket>=65534)continue;
+        float inverse=r->inv_near-(bucket-1)/r->depth_scale;
+        if(!isfinite(inverse)||inverse<=0)continue;
+        float z=1/inverse,ex=(x-(PLOT_X0+PLOT_X1)*.5f)*z/focal;
+        float ey=((PLOT_Y0+PLOT_Y1)*.5f-y)*z/focal;
+        float ry=-r->sp*ey-r->cp*z,dz=r->cp*ey-r->sp*z;
+        float dx=r->cy*ex+r->sy*ry,dy=-r->sy*ex+r->cy*ry;
+        float wx=r->v.x+r->v.radius*(r->ex+dx);
+        float wy=r->v.y+r->v.radius*(r->ey+dy);
+        float wz=r->v.z+r->v.radius*(r->ez+dz);
+        preview3d_add(preview,x,y,wx,wy,wz,gint_vram[(size_t)y*DWIDTH+x]);
+    }
+}
+int voxel3d_render_ex(RaySurface const *surfaces,int count,EvalVars const *base,
+                   Volume const *volume,Camera const *camera,Preview3D *preview,
                    ProgressFn progress,void *ctx,VoxelStats *stats)
 {
     if(!surfaces||count<1||count>RAY_MAX_SURFACES||!base||!stats)return -1;
@@ -446,7 +472,15 @@ int voxel3d_render(RaySurface const *surfaces,int count,EvalVars const *base,
         }
     }
     if(progress&&!progress(r.n,r.n,ctx))result=0;
+    if(result==1)capture_preview(&r,preview);
 done:
     if(result==0)stats->canceled=1;
     free(r.depth);free(r.bits[0]);free(r.bits[1]);return result;
+}
+
+int voxel3d_render(RaySurface const *surfaces,int count,EvalVars const *base,
+                   Volume const *volume,Camera const *camera,
+                   ProgressFn progress,void *ctx,VoxelStats *stats)
+{
+    return voxel3d_render_ex(surfaces,count,base,volume,camera,NULL,progress,ctx,stats);
 }

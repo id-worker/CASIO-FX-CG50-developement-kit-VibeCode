@@ -76,13 +76,14 @@ void dprint(int x,int y,int color,char const *fmt,...){char s[256];va_list ap;va
 static key_event_t const *script;
 static size_t script_count;
 static key_event_t async_key;
-static int async_after=-1;
+static int async_after=-1,async_calculation=-1;
 static int menus_opened;
 void host_keys(key_event_t const *keys,size_t count){
-    script=keys;script_count=count;script_pos=0;frames=0;in_calculation=calculation_count=polls_outside_calculation=partial_updates=0;async_after=-1;snapshot_frame=0;snapshot_key=(size_t)-1;snapshot_getkey=(size_t)-1;menus_opened=0;text_log_used=0;text_log[0]=0;
+    script=keys;script_count=count;script_pos=0;frames=0;in_calculation=calculation_count=polls_outside_calculation=partial_updates=0;async_after=-1;async_calculation=-1;snapshot_frame=0;snapshot_key=(size_t)-1;snapshot_getkey=(size_t)-1;menus_opened=0;text_log_used=0;text_log[0]=0;
     for(int i=0;i<64;i++)vram_storage[i]=vram_storage[DWIDTH*DHEIGHT+64+i]=0x5aa5;
 }
-void host_async_key(key_event_t key,int after_polls){async_key=key;async_after=after_polls;}
+void host_async_key(key_event_t key,int after_polls){async_key=key;async_after=after_polls;async_calculation=-1;}
+void host_async_on_calculation(key_event_t key,int calculation,int after_polls){async_key=key;async_after=after_polls;async_calculation=calculation;}
 size_t host_keys_used(void){return script_pos;}
 unsigned host_frames(void){return frames;}
 void host_snapshot_on_frame(unsigned frame,const char *path){snapshot_frame=frame;snprintf(snapshot_path,sizeof snapshot_path,"%s",path);}
@@ -109,7 +110,7 @@ int keydown(int key){
 }
 key_event_t pollevent(void){
     if(!in_calculation)polls_outside_calculation++;
-    if(async_after>=0 && async_after--==0){async_after=-1;return async_key;}
+    if(async_after>=0 && (async_calculation<0||async_calculation==calculation_count) && async_after--==0){async_after=-1;return async_key;}
     return (key_event_t){.type=KEYEV_NONE};
 }
 void gint_setrestart(int enable){(void)enable;}

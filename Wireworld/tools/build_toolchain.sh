@@ -1,93 +1,52 @@
 #!/bin/sh
-#
-# build_toolchain.sh -- rebuilds everything needed to produce a .g3a:
-#
-#   binutils + gcc for sh3eb-elf (the SH4A big endian CPU of the fx-CG50)
-#   libfxcg   -- the Prizm syscall library, headers and linker script
-#   mkg3a     -- packs a .bin into a .g3a with icons and a name
-#
-# Everything is built under /var/tmp/pt, which is scratch space: it does not
-# survive a restart of this sandbox, so this script has to be run again in a
-# new session before `make` works.  The .g3a it produces does survive.
-#
-#   sh tools/build_toolchain.sh        (takes about half an hour on 2 cores)
-#
-set -e
-
+# Optional Debian/Ubuntu helper for the Prizm big-endian SH toolchain.
+# See README.md first; the resulting SDK is *not* needed to run the .g3a.
+# Downloads source archives and may take a long time; build as a normal user.
+set -eu
 PREFIX=${PREFIX:-/var/tmp/pt/cross}
-SDK=${SDK:-/var/tmp/pt/libfxcg}
+SDK=${FXCGSDK:-/var/tmp/pt/libfxcg}
 SRC=${SRC:-/var/tmp/pt/src}
-JOBS=${JOBS:-$(nproc)}
-
-sudo apt-get install -y -qq build-essential texinfo bison flex \
-    libgmp-dev libmpfr-dev libmpc-dev libpng-dev cmake git wget xz-utils
-
-mkdir -p "$SRC"
+JOBS=${JOBS:-2}
 export PATH="$PREFIX/bin:$PATH"
-
-# ---------------------------------------------------------------- sources
+mkdir -p "$PREFIX/bin" "$SRC"
 cd "$SRC"
-[ -f binutils-2.42.tar.xz ] ||
-    wget -q https://ftp.gnu.org/gnu/binutils/binutils-2.42.tar.xz
-[ -f gcc-12.4.0.tar.xz ] ||
-    wget -q https://ftp.gnu.org/gnu/gcc/gcc-12.4.0/gcc-12.4.0.tar.xz
-[ -d binutils-2.42 ] || tar xf binutils-2.42.tar.xz
-[ -d gcc-12.4.0 ]    || tar xf gcc-12.4.0.tar.xz
-
-# --------------------------------------------------------------- binutils
-if [ ! -x "$PREFIX/bin/sh3eb-elf-as" ]; then
-    echo "== binutils"
-    mkdir -p "$SRC/b-binutils"
-    cd "$SRC/b-binutils"
-    ../binutils-2.42/configure \
-        --target=sh3eb-elf --prefix="$PREFIX" \
-        --disable-nls --disable-werror --disable-gdb --disable-sim
-    make -j"$JOBS"
-    make install
-fi
-
-# -------------------------------------------------------------------- gcc
 if [ ! -x "$PREFIX/bin/sh3eb-elf-gcc" ]; then
-    echo "== gcc"
-    cd "$SRC/gcc-12.4.0"
-    ./contrib/download_prerequisites
-    mkdir -p "$SRC/b-gcc"
-    cd "$SRC/b-gcc"
-    ../gcc-12.4.0/configure \
-        --target=sh3eb-elf --prefix="$PREFIX" \
-        --enable-languages=c --without-headers --with-newlib \
-        --disable-nls --disable-threads --disable-shared \
-        --disable-libssp --disable-libquadmath --disable-decimal-float \
-        --disable-libgomp --disable-libsanitizer --disable-multilib
-    make -j"$JOBS" all-gcc all-target-libgcc
-    make install-gcc install-target-libgcc
+    [ -f binutils-2.42.tar.xz ] || curl -fL --retry 3 -o binutils-2.42.tar.xz https://ftp.gnu.org/gnu/binutils/binutils-2.42.tar.xz
+    [ -f gcc-12.4.0.tar.xz ] || curl -fL --retry 3 -o gcc-12.4.0.tar.xz https://ftp.gnu.org/gnu/gcc/gcc-12.4.0/gcc-12.4.0.tar.xz
+    echo 'f6e4d41fd5fc778b06b7891457b3620da5ecea1006c6a4a41ae998109f85a800  binutils-2.42.tar.xz' | sha256sum -c -
+    echo '704f652604ccbccb14bdabf3478c9511c89788b12cb3bbffded37341916a9175  gcc-12.4.0.tar.xz' | sha256sum -c -
+    [ -d binutils-2.42 ] || tar xf binutils-2.42.tar.xz
+    [ -d gcc-12.4.0 ] || tar xf gcc-12.4.0.tar.xz
+    mkdir -p b-binutils b-gcc
+    (cd b-binutils && ../binutils-2.42/configure --target=sh3eb-elf --prefix="$PREFIX" \
+        --disable-nls --disable-werror --disable-gdb --disable-sim && make -j"$JOBS" && make install)
+    (cd b-gcc && ../gcc-12.4.0/configure --target=sh3eb-elf --prefix="$PREFIX" \
+        --enable-languages=c --without-headers --with-newlib --disable-nls --disable-threads \
+        --disable-shared --disable-libssp --disable-libquadmath --disable-decimal-float \
+        --disable-libgomp --disable-libsanitizer --disable-multilib && \
+        make -j"$JOBS" all-gcc all-target-libgcc && make install-gcc install-target-libgcc)
 fi
-
-# ---------------------------------------------------------------- libfxcg
-if [ ! -f "$SDK/lib/libfxcg.a" ]; then
-    echo "== libfxcg"
-    mkdir -p /var/tmp/pt
-    cd /var/tmp/pt
-    [ -d libfxcg ] || git clone --depth 1 https://github.com/Jonimoose/libfxcg.git
-    cd libfxcg
-    make
-    # the SDK layout the project Makefile expects: include/, lib/, toolchain/
-    mkdir -p "$SDK/include" "$SDK/lib" "$SDK/toolchain"
-    [ -f libc/libc.a ]       && cp -f libc/libc.a       "$SDK/lib/" || true
-    [ -f libfxcg/libfxcg.a ] && cp -f libfxcg/libfxcg.a "$SDK/lib/" || true
-    [ -f prizm.x ]           && cp -f prizm.x           "$SDK/toolchain/" || true
+# This toolchain calls the big-endian archive libgcc.a; PrizmSDK expects libgcc_be.a.
+LIBGCC=$(sh3eb-elf-gcc -print-libgcc-file-name)
+[ -f "$LIBGCC" ] || { echo 'libgcc.a not found' >&2; exit 1; }
+[ -e "$(dirname "$LIBGCC")/libgcc_be.a" ] || ln -s "$LIBGCC" "$(dirname "$LIBGCC")/libgcc_be.a"
+if [ ! -f "$SDK/lib/libfxcg.a" ] || [ ! -f "$SDK/lib/libc.a" ]; then
+    mkdir -p "$SDK"
+    curl -fL --retry 3 -o "$SRC/libfxcg.tar.gz" https://codeload.github.com/Jonimoose/libfxcg/tar.gz/refs/heads/master
+    tar xzf "$SRC/libfxcg.tar.gz" --strip-components=1 -C "$SDK"
+    # Build without LTO so the SDK archives are compatible with this compiler.
+    find "$SDK" -type f \( -name Makefile -o -name '*.mk' -o -name '*rules' \) -exec sed -i 's/-flto//g' {} +
+    make -C "$SDK" -j"$JOBS"
 fi
-
-# ----------------------------------------------------------------- mkg3a
 if [ ! -x "$PREFIX/bin/mkg3a" ]; then
-    echo "== mkg3a"
-    cd "$SRC"
-    [ -d mkg3a ] || git clone --depth 1 https://gitlab.com/taricorp/mkg3a.git
-    cd mkg3a
-    cmake .
-    make
-    if [ -f src/mkg3a ]; then cp src/mkg3a "$PREFIX/bin/"; else cp mkg3a "$PREFIX/bin/"; fi
+    mkdir -p "$SRC/mkg3a-src" "$SRC/mkg3a-build"
+    curl -fL --retry 3 -o "$SRC/mkg3a.tar.gz" https://gitlab.com/taricorp/mkg3a/-/archive/master/mkg3a-master.tar.gz
+    tar xzf "$SRC/mkg3a.tar.gz" --strip-components=1 -C "$SRC/mkg3a-src"
+    cmake -S "$SRC/mkg3a-src" -B "$SRC/mkg3a-build"
+    cmake --build "$SRC/mkg3a-build" --parallel "$JOBS"
+    BIN=$(find "$SRC/mkg3a-build" -type f -name mkg3a -print -quit)
+    [ -n "$BIN" ] || { echo 'mkg3a not found' >&2; exit 1; }
+    cp "$BIN" "$PREFIX/bin/mkg3a"
+    chmod +x "$PREFIX/bin/mkg3a"
 fi
-
-echo "== done"
-ls -l "$PREFIX/bin/sh3eb-elf-gcc" "$PREFIX/bin/mkg3a" "$SDK/lib/libfxcg.a"
+printf '\nSDK ready. For this shell:\n  export FXCGSDK="%s"\n  export PATH="%s/bin:$PATH"\n' "$SDK" "$PREFIX"

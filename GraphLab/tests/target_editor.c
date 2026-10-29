@@ -44,6 +44,8 @@ void dsize(char const *s,font_t const *font,int *w,int *h){(void)font;if(w)*w=(i
 struct dwindow dwindow={0,0,DWIDTH,DHEIGHT};
 struct dwindow dwindow_set(struct dwindow n){struct dwindow old=dwindow;dwindow=n;return old;}
 int state_validate(GraphState const *s){(void)s;return 1;}
+int state_ray_quality(GraphState const *s){(void)s;return 20;}
+int state_set_ray_quality(GraphState *s,int q){(void)s;return q>=4&&q<=48;}
 int storage_save(GraphState const *s){(void)s;return 0;}
 int graphlab_test_editor(char *destination,int mode);
 #define TAP(k) {KEY_##k,1},{KEY_##k,0}
@@ -219,5 +221,39 @@ int main(void){
     formula[0]=0;begin(num_left,COUNT(num_left));
     if(!graphlab_test_editor(formula,1))return 62;
     if(strcmp(formula,"(1+1)/(2)"))return 63;
+    /* Long-source edit and numerator regrouping on a real 16 KiB SH stack.
+       Only the lower 12 KiB are filled because main already occupies the top. */
+    static const struct Event long_fraction[]={TAP(LEFT),TAP(UP),TAP(EXE),TAP(EXIT)};
+    strcpy(formula,"0.");memset(formula+2,'0',550);strcpy(formula+552,"/(2)");
+    memset(target_stack,0xa5,12288);begin(long_fraction,COUNT(long_fraction));
+    if(!graphlab_test_editor(formula,1))return 64;
+    if(strlen(formula)<550 || formula[0]!='(' || !strstr(formula,")/(2)"))return 65;
+    for(int i=0;i<512;i++)if(target_stack[i]!=0xa5)return 66;
+    /* Near the supported expression-tree depth, exercise display and compile. */
+    static const struct Event accept_long[]={TAP(EXE),TAP(EXIT)};
+    formula[0]=0;for(int i=0;i<58;i++)strcat(formula,i?"+x":"x");
+    begin(accept_long,COUNT(accept_long));
+    if(!graphlab_test_editor(formula,1))return 67;
+    for(int i=0;i<512;i++)if(target_stack[i]!=0xa5)return 68;
+    /* Regroup a deep numerator while both metadata copies are active. */
+    formula[0]=0;for(int i=0;i<56;i++)strcat(formula,i?"*x":"x");strcat(formula,"/(2)");
+    begin(long_fraction,COUNT(long_fraction));
+    if(!graphlab_test_editor(formula,1))return 69;
+    if(formula[0]!='(')return 70;
+    for(int i=0;i<512;i++)if(target_stack[i]!=0xa5)return 71;
+    /* Open a numeric settings editor from inside a long outer formula, enter
+       a deep expression, close it, and accept the unchanged outer formula.
+       This exercises two editor sessions concurrently on the 16 KiB stack. */
+    static struct Event nested[320];int nn=0;
+#define APPEND_TAP(k) do {nested[nn++]=(struct Event){KEY_##k,1};nested[nn++]=(struct Event){KEY_##k,0};} while(0)
+    APPEND_TAP(OPTN);APPEND_TAP(DOWN);APPEND_TAP(EXE);
+    APPEND_TAP(SHIFT);APPEND_TAP(DEL);
+    for(int i=0;i<58;i++){if(i)APPEND_TAP(ADD);APPEND_TAP(1);}
+    APPEND_TAP(EXE);APPEND_TAP(EXIT);APPEND_TAP(EXE);
+#undef APPEND_TAP
+    strcpy(formula,"0.");memset(formula+2,'0',550);formula[552]=0;
+    begin(nested,nn);
+    if(!graphlab_test_editor(formula,1) || strlen(formula)!=552)return 72;
+    for(int i=0;i<512;i++)if(target_stack[i]!=0xa5)return 73;
     return 0;
 }

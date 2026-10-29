@@ -7,8 +7,9 @@
 #include <assert.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+typedef struct {char formula[160];uint8_t active;} LegacyEquation;
 typedef struct {
-    Equation curve[CURVE_COUNT],surface[SURFACE_COUNT];char recurrence[FRACTAL_COUNT][EXPR_MAX];
+    LegacyEquation curve[CURVE_COUNT],surface[SURFACE_COUNT];char recurrence[FRACTAL_COUNT][160];
     float param_a,param_b,param_c,param_t,plane_x,plane_y,plane_scale;
     float volume_x,volume_y,volume_z,volume_radius,camera_yaw,camera_pitch,camera_zoom;
     FractalView fractal;uint8_t grid,detail2,detail3,wire,axes,fractal_slot;
@@ -21,16 +22,29 @@ typedef struct {uint32_t magic,version,sequence,payload_size,checksum;Version3St
 static uint32_t crc_add(uint32_t c,unsigned char const *data,size_t len) {
     for(size_t i=0;i<len;i++){c^=data[i];for(int b=0;b<8;b++)c=(c>>1)^((0u-(c&1u))&0xedb88320u);}return c;
 }
+static void pack_legacy(LegacyState *dst,GraphState const *s) {
+    memset(dst,0,sizeof *dst);
+    for(int i=0;i<CURVE_COUNT;i++){assert(strlen(s->curve[i].formula)<160);strcpy(dst->curve[i].formula,s->curve[i].formula);dst->curve[i].active=s->curve[i].active;}
+    for(int i=0;i<SURFACE_COUNT;i++){assert(strlen(s->surface[i].formula)<160);strcpy(dst->surface[i].formula,s->surface[i].formula);dst->surface[i].active=s->surface[i].active;}
+    for(int i=0;i<FRACTAL_COUNT;i++){assert(strlen(s->recurrence[i])<160);strcpy(dst->recurrence[i],s->recurrence[i]);}
+#define P(f) dst->f=s->f
+    P(param_a);P(param_b);P(param_c);P(param_t);P(plane_x);P(plane_y);P(plane_scale);
+    P(volume_x);P(volume_y);P(volume_z);P(volume_radius);P(camera_yaw);P(camera_pitch);P(camera_zoom);
+    P(fractal);P(grid);P(detail2);P(detail3);P(wire);P(axes);P(fractal_slot);
+#undef P
+}
 static void make_legacy(char const *path,GraphState const *s) {
     LegacyRecord r={.magic=0x474c4142u,.version=1,.sequence=7,.payload_size=sizeof(LegacyState)};
-    memcpy(&r.state,s,sizeof r.state);uint32_t c=0xffffffffu;
+    pack_legacy(&r.state,s);uint32_t c=0xffffffffu;
     c=crc_add(c,(unsigned char *)&r.version,sizeof r.version);c=crc_add(c,(unsigned char *)&r.sequence,sizeof r.sequence);
     c=crc_add(c,(unsigned char *)&r.payload_size,sizeof r.payload_size);c=crc_add(c,(unsigned char *)&r.state,sizeof r.state);r.checksum=~c;
     int fd=open(path,O_WRONLY|O_CREAT|O_EXCL,0600);assert(fd>=0);assert(write(fd,&r,sizeof r)==(ssize_t)sizeof r);assert(close(fd)==0);
 }
 static void make_version2(char const *path,GraphState const *s) {
     Version2Record r={.magic=0x474c4142u,.version=2,.sequence=9,.payload_size=sizeof(Version2State)};
-    memcpy(&r.state,s,sizeof r.state);
+    pack_legacy(&r.state.prefix,s);
+    r.state.eye_x=s->eye_x;r.state.eye_y=s->eye_y;r.state.eye_z=s->eye_z;
+    r.state.period_x=s->period_x;r.state.axes_front=s->axes_front;
     /* The last three v2 bytes were padding; don't rely on their values. */
     unsigned char *bytes=(unsigned char *)&r.state;
     bytes[sizeof(r.state)-1]=0x7f;
@@ -41,7 +55,9 @@ static void make_version2(char const *path,GraphState const *s) {
 }
 static void make_version3(char const *path,GraphState const *s) {
     Version3Record r={.magic=0x474c4142u,.version=3,.sequence=11,.payload_size=sizeof(Version3State)};
-    memcpy(&r.state,s,sizeof r.state);
+    pack_legacy(&r.state.prefix.prefix,s);
+    r.state.prefix.eye_x=s->eye_x;r.state.prefix.eye_y=s->eye_y;r.state.prefix.eye_z=s->eye_z;
+    r.state.prefix.period_x=s->period_x;r.state.prefix.axes_front=s->axes_front;r.state.curve_width=s->curve_width;
     unsigned char *bytes=(unsigned char *)&r.state;bytes[sizeof(r.state)-1]=0x6a;
     uint32_t c=0xffffffffu;
     c=crc_add(c,(unsigned char *)&r.version,sizeof r.version);c=crc_add(c,(unsigned char *)&r.sequence,sizeof r.sequence);
@@ -54,7 +70,7 @@ int main(void) {
     assert(storage_save(&st)==0);assert(storage_load(&out)==1);assert(strcmp(out.curve[0].formula,"y=sin(x)")==0);
     strcpy(st.curve[0].formula,"x^2+y^2=1");assert(storage_save(&st)==0);assert(storage_load(&out)==1);
     assert(strcmp(out.curve[0].formula,"x^2+y^2=1")==0);
-    char a[200],b[200];snprintf(a,sizeof a,"%s/GLAB3_A.DAT",path);snprintf(b,sizeof b,"%s/GLAB3_B.DAT",path);
+    char a[200],b[200];snprintf(a,sizeof a,"%s/GLAB4_A.DAT",path);snprintf(b,sizeof b,"%s/GLAB4_B.DAT",path);
     int fd=open(b,O_RDWR);assert(fd>=0);assert(lseek(fd,30,SEEK_SET)==30);unsigned char q=0xaa;assert(write(fd,&q,1)==1);close(fd);
     assert(storage_load(&out)==1);assert(strcmp(out.curve[0].formula,"y=sin(x)")==0);
     /* One valid save plus one damaged/foreign slot is protected. */

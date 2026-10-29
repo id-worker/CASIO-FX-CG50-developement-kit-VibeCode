@@ -1,13 +1,13 @@
 #!/bin/sh
-# Exchange actual journal files between independently compiled 1.06 and
-# a previous GraphLab version (1.05 by default; PREVIOUS_ROOT can select another).
+# Exchange actual journal files between independently compiled 1.09 and
+# a previous GraphLab version (1.08 by default; PREVIOUS_ROOT can select another).
 # This tests host files; it does not emulate the calculator file system.
 set -eu
 cd "$(dirname "$0")/.."
 newroot=$(pwd)
-oldroot=${PREVIOUS_ROOT:-"$(dirname "$newroot")/GraphLab_fxCG50_v1.05"}
+oldroot=${PREVIOUS_ROOT:-"$(dirname "$(dirname "$newroot")")/GraphLab_fxCG50_v1.08"}
 test -f "$oldroot/src/storage.c" || { echo "Set PREVIOUS_ROOT to the extracted previous GraphLab source." >&2; exit 1; }
-work=$(mktemp -d "${TMPDIR:-/tmp}/gl106-cross-XXXXXX")
+work=$(mktemp -d "${TMPDIR:-/tmp}/gl109-cross-XXXXXX")
 trap 'rm -rf "$work"' EXIT HUP INT TERM
 CC=${CC:-cc}
 "$CC" -std=c11 -DGL_HOST -Wall -Wextra -Werror -I"$oldroot/src" tests/cross_storage.c "$oldroot/src/storage.c" -lm -o "$work/old"
@@ -15,5 +15,10 @@ CC=${CC:-cc}
 mkdir "$work/data"
 "$work/old" "$work/data" write-old
 "$work/new" "$work/data" read-old
+sha256sum "$work/data"/GLAB3_*.DAT > "$work/old-before"
 "$work/new" "$work/data" write-new
-"$work/old" "$work/data" read-new
+sha256sum "$work/data"/GLAB3_*.DAT > "$work/old-after"
+cmp "$work/old-before" "$work/old-after"
+"$work/new" "$work/data" read-new
+"$work/old" "$work/data" read-old
+echo 'Old journal byte-for-byte intact; new and old versions retain their own saves.' 

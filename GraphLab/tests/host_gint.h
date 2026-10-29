@@ -50,6 +50,8 @@ void gint_setrestart(int enable);
 void gint_osmenu(void);
 void host_keys(key_event_t const *keys,size_t count);
 void host_async_key(key_event_t key,int after_polls);
+/* Deliver an asynchronous key only during a selected calculation (1-based). */
+void host_async_on_calculation(key_event_t key,int calculation,int after_polls);
 size_t host_keys_used(void);
 unsigned host_frames(void);
 void host_snapshot_on_frame(unsigned frame,const char *path);

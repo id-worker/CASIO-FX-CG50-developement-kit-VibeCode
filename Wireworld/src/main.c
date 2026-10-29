@@ -3,16 +3,9 @@
  *
  * Build: see the Makefile next to this file (needs PrizmSDK / libfxcg).
  *
- * Screen.  GetVRAMAddress() returns the OS video buffer, which is exactly the
- * visible 384x216 area, one unsigned short (RGB565) per pixel:
- *
- *   y = 0 .. 17    one line of status text (only when the header is on)
- *   the rest       the cell grid, cell_px pixels per cell
- *
- * The mini font of the calculator needs 18 pixels per line, so every text box
- * here is laid out with that in mind (see row_h).  The highlight of a menu row
- * is done with PrintMini's own background colour, so it can never end up above
- * or below the text it belongs to.
+ * Screen. GetVRAMAddress() returns the visible 384x216 RGB565 video buffer.
+ * A compact embedded 6x11 bitmap font makes the text layout independent of
+ * OS font metrics; the status line is optional and the rest is the cell grid.
  *
  * The field is much bigger than the screen (see field_list[]) and wraps around
  * in both directions, so it behaves like an endless sheet: the view follows the
@@ -38,6 +31,7 @@
 
 #include "wireworld.h"
 #include "patterns.h"
+#include "font_ww.h"
 
 /* ------------------------------------------------------------------ */
 /* geometry                                                            */
@@ -45,35 +39,61 @@
 #define VRAM_W      384     /* OS video buffer == the visible area */
 #define VIS_W       384
 #define VIS_H       216
-/* The 18 px mini font is what PrintMini draws with, but how much of the
-   18 px the glyphs actually use differs between OS versions, so it is
-   measured once at start-up (see measure_font) and every box is laid out
-   from the result. */
-static int font_h   = 18;   /* height of the glyphs, measured     */
-static int font_off = 0;    /* glyph top relative to the y given  */
-static int row_h    = 21;   /* vertical distance between two rows */
-static int hdr_h    = 20;   /* height of the status line         */
+/* Fixed bitmap cell metrics; independent of calculator OS font versions. */
+static const int font_h   = WW_FONT_H;
+static const int font_off = 0;
+static const int row_h    = WW_FONT_H + 3;
+static const int hdr_h    = WW_FONT_H + 2;
 
 /* ------------------------------------------------------------------ */
 /* palette (RGB565)                                                    */
 /* ------------------------------------------------------------------ */
-#define COL_BG      0x0000  /* empty cell                        */
-#define COL_GRID    0x3186  /* ruler mark every 10 cells         */
-#define COL_GRID2   0x18C3  /* thin grid lines                   */
-#define COL_EDGE    0xA01F  /* seam where the world wraps        */
-#define COL_WIRE    0xFFE0  /* conductor (yellow)                */
-#define COL_HEAD    0x03FF  /* electron head (bright blue/cyan)  */
-#define COL_TAIL    0xF800  /* electron tail (red)               */
+/* Host tests sometimes assign unique colors to semantic layers so they can
+   detect a stale overlay even when the real colors are all black or white.
+   Never enabled in the calculator build. */
+#ifdef WW_TEST_SEMANTIC_COLORS
+#define COL_BG       0x0000
+#define COL_GRID     0x3186
+#define COL_GRID2    0x18C3
+#define COL_EDGE     0xA01F
+#define COL_WIRE     0xFFE0
+#define COL_HEAD     0x03FF
+#define COL_TAIL     0xF800
 #define COL_CURSOR   0xFFFF
-#define COL_PREVIEW  0xC618  /* shape / paste box being placed    */
-#define COL_COPY_BOX 0x07E0  /* green frame while selecting copy  */
-#define COL_CUT_BOX  0xFD20  /* orange frame while selecting cut  */
-#define COL_HDRBG    0x0013
-#define COL_HDRFG   0xFFFF
-#define COL_BOXBG   0x0008
-#define COL_BOXFG   0xFFFF
-#define COL_BOXDIM  0xA534
-#define COL_BOXSEL  0x001F
+#define COL_PREVIEW  0xC618
+#define COL_COPY_BOX 0x07E0
+#define COL_CUT_BOX  0xFD20
+#define COL_HDRBG    0x0846
+#define COL_HDRFG    0xFFFF
+#define COL_HDRDIM   0xBDF7
+#define COL_ACCENT   0x5DFF
+#define COL_BOXBG    0x0827
+#define COL_BOXEDGE  0x3BB3
+#define COL_BOXFG    0xFFFF
+#define COL_BOXDIM   0xCE59
+#define COL_BOXSEL   0x11B0
+#else
+#define COL_BG       0x0000  /* empty cell: simulation content */
+#define COL_GRID     0xFFFF  /* ruler and field overlays */
+#define COL_GRID2    0xFFFF
+#define COL_EDGE     0xFFFF  /* wrap seam */
+#define COL_WIRE     0xFFE0  /* conductor: unchanged yellow */
+#define COL_HEAD     0x03FF  /* electron head: unchanged cyan */
+#define COL_TAIL     0xF800  /* electron tail: unchanged red */
+#define COL_CURSOR   0xFFFF
+#define COL_PREVIEW  0xFFFF
+#define COL_COPY_BOX 0xFFFF
+#define COL_CUT_BOX  0xFFFF
+#define COL_HDRBG    0xFFFF
+#define COL_HDRFG    0x0000
+#define COL_HDRDIM   0x0000
+#define COL_ACCENT   0x0000
+#define COL_BOXBG    0xFFFF
+#define COL_BOXEDGE  0x0000
+#define COL_BOXFG    0x0000
+#define COL_BOXDIM   0x0000
+#define COL_BOXSEL   0x0000
+#endif
 
 /* ------------------------------------------------------------------ */
 /* tools, materials, speeds, sizes                                     */
@@ -167,6 +187,56 @@ static int is_arrow(int k)
            k == KEY_PRGM_LEFT || k == KEY_PRGM_RIGHT;
 }
 
+/* The fx-CG RTC ticks at 128 Hz and resets at midnight, not at 2^24.
+   Handle that rollover ourselves instead of stalling timers overnight.
+   See https://prizm.cemetech.net/Syscalls/RTC/RTC_GetTicks/ */
+#define RTC_HZ 128u
+#define RTC_DAY_TICKS (86400u * RTC_HZ)
+static unsigned rtc_ticks_between(int start, int end)
+{
+    unsigned a = (unsigned)start, b = (unsigned)end;
+    return b >= a ? b - a : RTC_DAY_TICKS - a + b;
+}
+
+static int rtc_elapsed_ms(int start, unsigned ms)
+{
+    /* 125/16 ms per tick; both products fit in 32 bits for one day. */
+    return rtc_ticks_between(start, RTC_GetTicks()) * 125u >= ms * 16u;
+}
+
+typedef struct {
+    int last_tick, rate, credit, pending;
+} SpeedClock;
+
+/* One generation immediately on resume, then accumulate 128 Hz ticks. This
+   avoids a blocking 1-second sleep at the slowest speed, and alternates 2/3
+   ticks when targeting 60/s. Never replay an unbounded backlog after a menu. */
+static int speed_clock_due(SpeedClock *sc, int active, int rate, int now)
+{
+    unsigned dt;
+    if (!active) {
+        sc->last_tick = now; sc->rate = rate; sc->credit = 0; sc->pending = 1;
+        return 0;
+    }
+    if (sc->pending) {
+        sc->last_tick = now; sc->rate = rate; sc->credit = 0; sc->pending = 0;
+        return 1;
+    }
+    if (rate != sc->rate) {
+        sc->last_tick = now; sc->rate = rate; sc->credit = 0;
+        return rate == 0;
+    }
+    if (rate == 0) { sc->last_tick = now; return 1; }
+    dt = rtc_ticks_between(sc->last_tick, now);
+    sc->last_tick = now;
+    if (dt > RTC_HZ) { sc->credit = 0; return 1; }
+    sc->credit += (int)dt * rate;
+    if (sc->credit < (int)RTC_HZ) return 0;
+    sc->credit -= (int)RTC_HZ;
+    if (sc->credit >= (int)RTC_HZ) sc->credit = (int)RTC_HZ - 1;
+    return 1;
+}
+
 /* edge detection + auto repeat (300 ms, then about 18 keys/s).
    Only the arrows repeat: everything else acts once per press. */
 static int poll_key(void)
@@ -185,14 +255,14 @@ static int poll_key(void)
     }
     if (!is_arrow(k)) return 0;
     if (!repeating) {
-        if (RTC_Elapsed_ms(start, 300)) {
+        if (rtc_elapsed_ms(start, 300)) {
             repeating = 1;
             start = RTC_GetTicks();
             return k;
         }
         return 0;
     }
-    if (RTC_Elapsed_ms(start, 55)) {
+    if (rtc_elapsed_ms(start, 55)) {
         start = RTC_GetTicks();
         return k;
     }
@@ -409,40 +479,31 @@ static void px_fill_grid(int x0, int y0, int x1, int y1, unsigned short col)
     px_fill(x0, y0, x1, y1, col);
 }
 
+/* Compact opaque text. Clip every pixel to the visible 384x216 VRAM;
+   unsupported bytes are shown as '?'. Each row is packed MSB-first. */
 static void mini_text(int x, int y, const char *s,
                       unsigned short fg, unsigned short bg)
 {
-    int ix = x, iy = y;
-    PrintMini(&ix, &iy, s, 0, 0xFFFFFFFF, 0, 0, (int)fg, (int)bg, 1, 0);
-}
-
-/* Prints one text line on a scratch strip and looks at what changed, so
-   the text boxes fit on any OS version.  Run before anything is drawn. */
-static void measure_font(void)
-{
-    int x, y, min_y = 1000, max_y = -1;
-
-    px_fill(0, 60, 80, 150, COL_BG);
-    mini_text(2, 100, "Hy|g", COL_CURSOR, COL_BG);
-    for (y = 60; y <= 150; y++) {
-        for (x = 0; x < 80; x++)
-            if (vram[(size_t)y * VRAM_W + x] != COL_BG) break;
-        if (x < 80) {
-            if (y < min_y) min_y = y;
-            if (y > max_y) max_y = y;
+    while (*s && x < VIS_W) {
+        unsigned char c = (unsigned char)*s++;
+        const unsigned char *glyph;
+        int gy, gx;
+        if (c < 32 || c > 126) c = '?';
+        glyph = ww_glyphs[c - 32];
+        for (gy = 0; gy < WW_FONT_H; gy++) {
+            int py = y + gy;
+            unsigned char bits = glyph[gy];
+            unsigned short *row;
+            if (py < 0 || py >= VIS_H) continue;
+            row = vram + (size_t)py * VRAM_W;
+            for (gx = 0; gx < WW_FONT_W; gx++) {
+                int px = x + gx;
+                if (px >= 0 && px < VIS_W)
+                    row[px] = (bits & (0x80u >> gx)) ? fg : bg;
+            }
         }
+        x += WW_FONT_W;
     }
-    if (max_y >= min_y) {
-        font_h = max_y - min_y + 1;
-        font_off = min_y - 100;
-    }
-    px_fill(0, 60, VIS_W - 1, 150, COL_BG);
-    if (font_h < 8)  font_h = 8;
-    if (font_h > 30) font_h = 30;
-    if (font_off < -20) font_off = -20;
-    if (font_off > 20)  font_off = 20;
-    row_h = font_h + 3;
-    hdr_h = font_h + 2;
 }
 
 /* where the glyphs of row i of a box that starts at y0 have to be put */
@@ -489,8 +550,11 @@ static void draw_cell(int sx, int sy)
         unsigned short gc = ((wx + 1) % 10 == 0) ? COL_GRID : COL_GRID2;
         int last = cell_px - 1;
         p = vram + (size_t)(grid_top + sy * cell_px) * VRAM_W + sx * cell_px;
-        for (j = 0; j < cell_px; j++) p[last * VRAM_W + j] = gc;
-        for (i = 0; i < cell_px; i++) p[i * VRAM_W + last] = gc;
+        int major = ((wx + 1) % 10 == 0);
+        for (j = 0; j < cell_px; j++)
+            if (major || !(j & 1)) p[last * VRAM_W + j] = gc;
+        for (i = 0; i < cell_px; i++)
+            if (major || !(i & 1)) p[i * VRAM_W + last] = gc;
     }
 
     /* the seam: where the world wraps onto itself */
@@ -551,23 +615,34 @@ static const char *tool_label(void)
     return buf;
 }
 
+static int header_part(int x, const char *text, unsigned short color)
+{
+    mini_text(x, 1, text, color, COL_HDRBG);
+    return x + (int)strlen(text) * WW_FONT_W;
+}
+
 static void draw_header(void)
 {
-    char buf[96], sbuf[16];
+    char buf[96], sbuf[24];
+    int x = 2;
 
-    if (speed_ips[speed] == 0) {
-        strcpy(sbuf, running ? "MAX" : "MAX");
-    } else if (running && ips_measured) {
+    if (speed_ips[speed] == 0) strcpy(sbuf, "MAX");
+    else if (running && ips_measured)
         sprintf(sbuf, "%d/%d", speed_ips[speed], ips_measured);
-    } else {
-        sprintf(sbuf, "%d", speed_ips[speed]);
-    }
+    else sprintf(sbuf, "%d", speed_ips[speed]);
+
     px_fill(0, 0, VIS_W - 1, hdr_h - 1, COL_HDRBG);
-    sprintf(buf, "G%06lu S%s %s %s%s X%03d Y%03d Z%d",
-            world.gen, sbuf, running ? "RUN" : "STOP",
-            tool_label(), anchor_on ? "*" : "",
-            cur_x, cur_y, cell_px);
-    mini_text(2, 1 - font_off, buf, COL_HDRFG, COL_HDRBG);
+    px_fill(0, hdr_h - 1, VIS_W - 1, hdr_h - 1, COL_BOXEDGE);
+    sprintf(buf, "G%06lu", world.gen);
+    x = header_part(x, buf, COL_HDRFG);
+    sprintf(buf, " S%s ", sbuf);
+    x = header_part(x, buf, COL_HDRDIM);
+    x = header_part(x, running ? "RUN" : "STOP",
+                    COL_HDRFG);
+    sprintf(buf, " %s%s", tool_label(), anchor_on ? "*" : "");
+    x = header_part(x, buf, COL_HDRFG);
+    sprintf(buf, " X%03d Y%03d Z%d", cur_x, cur_y, cell_px);
+    header_part(x, buf, COL_HDRDIM);
 }
 
 static void toast(const char *msg)
@@ -580,15 +655,15 @@ static void toast(const char *msg)
 
 static void draw_toast(void)
 {
-    int w = (int)strlen(toast_msg) * 6 + 12;
+    int w = (int)strlen(toast_msg) * WW_FONT_W + 12;
     int x0 = 4, y0 = VIS_H - (font_h + 8), x1, y1 = VIS_H - 4;
     if (w > VIS_W - 8) w = VIS_W - 8;
     x1 = x0 + w;
     px_fill(x0, y0, x1, y1, COL_BOXBG);
-    px_fill(x0, y0, x1, y0, COL_BOXFG);
-    px_fill(x0, y1, x1, y1, COL_BOXFG);
-    px_fill(x0, y0, x0, y1, COL_BOXFG);
-    px_fill(x1, y0, x1, y1, COL_BOXFG);
+    px_fill(x0, y0, x1, y0, COL_BOXEDGE);
+    px_fill(x0, y1, x1, y1, COL_BOXEDGE);
+    px_fill(x0, y0, x0, y1, COL_ACCENT);
+    px_fill(x1, y0, x1, y1, COL_BOXEDGE);
     mini_text(x0 + 5, y0 + 3 - font_off, toast_msg, COL_BOXFG, COL_BOXBG);
     ov_add_pixels(x0, y0, x1, y1);
 }
@@ -980,7 +1055,7 @@ static void render_frame(void)
     /* FrameColor only remembers the colour, DrawFrame actually paints the
        border of the 396x224 panel around our 384x216 area.  The OS likes to
        take its white back, so it is repainted now and then. */
-    if (RTC_Elapsed_ms(last_frame_draw, 250)) {
+    if (rtc_elapsed_ms(last_frame_draw, 250)) {
         last_frame_draw = RTC_GetTicks();
         DrawFrame(COL_BG);
     }
@@ -998,7 +1073,7 @@ static void on_change(int x, int y, int state, void *ctx)
 
 static void step_frame(void)
 {
-    int changed = ww_step(&world, on_change, NULL);
+    int changed = ww_step_readonly_hook(&world, on_change, NULL);
     if (changed == 0) {
         running = 0;
         toast("NOTHING MOVES - PRESS F1");
@@ -1085,17 +1160,47 @@ static void clear_field(void)
     mark_all();
 }
 
+/* Place the camera on the actual demo rather than the centre of an empty
+   large world. At tight zooms, favour the electron heads so the moving
+   part of a circuit stays in view. The cells themselves stay at (2,2). */
+static void focus_pattern(void)
+{
+    int x, y, x0 = world.w, y0 = world.h, x1 = -1, y1 = -1;
+    int hx0 = world.w, hy0 = world.h, hx1 = -1, hy1 = -1;
+    for (y = 0; y < world.h; y++) for (x = 0; x < world.w; x++) {
+        int c = world.cells[y * world.w + x];
+        if (c == WW_EMPTY) continue;
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+        if (c == WW_HEAD) {
+            if (x < hx0) hx0 = x;
+            if (x > hx1) hx1 = x;
+            if (y < hy0) hy0 = y;
+            if (y > hy1) hy1 = y;
+        }
+    }
+    if (x1 < 0) { cur_x = world.w / 2; cur_y = world.h / 2; }
+    else {
+        if (hx1 >= 0 && x1 - x0 + 1 > view_w) { x0 = hx0; x1 = hx1; }
+        if (hy1 >= 0 && y1 - y0 + 1 > view_h) { y0 = hy0; y1 = hy1; }
+        cur_x = (x0 + x1) / 2;
+        cur_y = (y0 + y1) / 2;
+    }
+    recentre();
+    clamp_view();
+}
+
 static void load_pattern(int idx)
 {
     pat_index = idx;
     ww_clear(&world);
     ww_load_text(&world, patterns[idx].art, 2, 2);
     cam_x = cam_y = 0;
-    cur_x = world.w / 2;
-    cur_y = world.h / 2;
     running = 0;
     anchor_on = 0;
-    recentre();
+    focus_pattern();
     mark_all();
     toast(patterns[idx].title);
 }
@@ -1441,7 +1546,7 @@ static const char *help_pages[][HELP_LINES] = {
         "             of the 8 neighbour",
         "             cells are heads",
         "yellow wire, blue head, red tail,",
-        "white cursor, magenta seam"
+        "white cursor and wrap seam"
     }
 };
 
@@ -1449,10 +1554,21 @@ static const char *help_pages[][HELP_LINES] = {
 static void draw_box(int x0, int y0, int x1, int y1)
 {
     px_fill(x0, y0, x1, y1, COL_BOXBG);
-    px_fill(x0, y0, x1, y0, COL_BOXFG);
-    px_fill(x0, y1, x1, y1, COL_BOXFG);
-    px_fill(x0, y0, x0, y1, COL_BOXFG);
-    px_fill(x1, y0, x1, y1, COL_BOXFG);
+    px_fill(x0, y0, x1, y0, COL_BOXEDGE);
+    px_fill(x0, y1, x1, y1, COL_BOXEDGE);
+    px_fill(x0, y0, x0, y1, COL_BOXEDGE);
+    px_fill(x1, y0, x1, y1, COL_BOXEDGE);
+    px_fill(x0 + 1, y0, x0 + 42, y0, COL_ACCENT);
+}
+
+static void draw_choice(int x0, int x1, int y, const char *text, int selected)
+{
+    if (selected) {
+        px_fill(x0 + 4, y - 1, x1 - 4, y + font_h, COL_BOXSEL);
+        px_fill(x0 + 4, y - 1, x0 + 5, y + font_h, COL_ACCENT);
+    }
+    mini_text(x0 + 10, y, text, selected ? 0xFFFF : COL_BOXDIM,
+              selected ? COL_BOXSEL : COL_BOXBG);
 }
 
 static int box_bottom(int y0, int rows)
@@ -1547,8 +1663,7 @@ static void menu_line(int i, char *out)
     }
 }
 
-/* the highlight is PrintMini's own background colour, so it always sits
-   exactly behind the text, whatever the font metrics are */
+/* A full-width highlighted row with a small accent at the left. */
 static void draw_menu(int sel, int top)
 {
     int i, rows;
@@ -1563,9 +1678,7 @@ static void draw_menu(int sel, int top)
     for (i = 0; i < rows; i++) {
         int item = top + i;
         menu_line(item, buf);
-        mini_text(x0 + 8, row_y(y0, i), buf,
-                  item == sel ? COL_BOXFG : COL_BOXDIM,
-                  item == sel ? COL_BOXSEL : COL_BOXBG);
+        draw_choice(x0, x1, row_y(y0, i), buf, item == sel);
     }
     Bdisp_PutDisp_DD();
 }
@@ -1623,14 +1736,12 @@ static int pick_list(const char *title, int count, int current, Label label)
         y1 = box_bottom(y0, rows);
 
         draw_box(x0, y0, x1, y1);
-        mini_text(x0 + 8, row_y(y0, 0), title, COL_BOXFG, COL_BOXBG);
+        mini_text(x0 + 10, row_y(y0, 0), title, COL_ACCENT, COL_BOXBG);
         for (i = 1; i < rows; i++) {
             int item = top + i - 1;
             if (item >= count) break;
             label(item, buf);
-            mini_text(x0 + 8, row_y(y0, i), buf,
-                      item == sel ? COL_BOXFG : COL_BOXDIM,
-                      item == sel ? COL_BOXSEL : COL_BOXBG);
+            draw_choice(x0, x1, row_y(y0, i), buf, item == sel);
         }
         Bdisp_PutDisp_DD();
 
@@ -1808,8 +1919,11 @@ static int free_heap_kb(void)
         if (!p) break;
         blocks[n++] = p;
     }
-    while (n > 0) sys_free(blocks[--n]);
-    return n * 4;
+    {
+        int free_kb = n * 4;
+        while (n > 0) sys_free(blocks[--n]);
+        return free_kb;
+    }
 }
 
 static void diagnostics(void)
@@ -1826,30 +1940,30 @@ static void diagnostics(void)
     px_fill(VIS_W - 1, 0, VIS_W - 1, VIS_H - 1, COL_CURSOR);
 
     /* rules every 16 pixels */
-    for (x = 16; x < VIS_W; x += 16) px_fill(x, 1, x, VIS_H - 2, COL_WIRE);
-    for (y = 16; y < VIS_H; y += 16) px_fill(1, y, VIS_W - 2, y, COL_WIRE);
+    for (x = 16; x < VIS_W; x += 16) px_fill(x, 1, x, VIS_H - 2, COL_CURSOR);
+    for (y = 16; y < VIS_H; y += 16) px_fill(1, y, VIS_W - 2, y, COL_CURSOR);
 
     /* a corner to corner diagonal: with a bad stride it turns into steps */
     for (x = 0; x < VIS_W; x++) {
         y = x * (VIS_H - 1) / (VIS_W - 1);
-        px_fill(x, y, x, y + 1, COL_HEAD);
+        px_fill(x, y, x, y + 1, COL_CURSOR);
     }
 
-    sprintf(buf, "DIAG V1.63  STRIDE %d  %dx%d", VRAM_W, VIS_W, VIS_H);
+    sprintf(buf, "DIAG V1.65  STRIDE %d  %dx%d", VRAM_W, VIS_W, VIS_H);
     mini_text(6, row_y(2, 0), buf, COL_CURSOR, COL_BG);
     mini_text(6, row_y(2, 1), "FRAME, RULES AND DIAGONAL MUST BE STRAIGHT",
-              COL_TAIL, COL_BG);
+              COL_CURSOR, COL_BG);
     mini_text(6, row_y(2, 2), "BANDS OR STEPS => WRONG ROW STRIDE",
-              COL_TAIL, COL_BG);
+              COL_CURSOR, COL_BG);
     sprintf(buf, "CELL %d px   VIEW %dx%d cells", cell_px, view_w, view_h);
-    mini_text(6, row_y(2, 3), buf, COL_WIRE, COL_BG);
+    mini_text(6, row_y(2, 3), buf, COL_CURSOR, COL_BG);
     sprintf(buf, "FONT %d px   ROW %d px   MENU %d", font_h, row_h,
             GetGetkeyToMainFunctionReturnFlag());
-    mini_text(6, row_y(2, 4), buf, COL_WIRE, COL_BG);
+    mini_text(6, row_y(2, 4), buf, COL_CURSOR, COL_BG);
     sprintf(buf, "HEAP %d KB FREE   FIELD %dx%d", free_heap_kb(),
             world.w, world.h);
-    mini_text(6, row_y(2, 5), buf, COL_WIRE, COL_BG);
-    mini_text(6, row_y(2, 6), "ANY KEY = CONTINUE", COL_BOXDIM, COL_BG);
+    mini_text(6, row_y(2, 5), buf, COL_CURSOR, COL_BG);
+    mini_text(6, row_y(2, 6), "ANY KEY = CONTINUE", COL_CURSOR, COL_BG);
     Bdisp_PutDisp_DD();
 
     wait_any_key();
@@ -1864,10 +1978,10 @@ static void diagnostics(void)
    "leave the add-in" sequence, so the main menu is not left thinking the
    add-in is still running (which made it swallow the first tap on the
    icon: it only started again after some other add-in had been run). */
-/* There is no syscall to *set* the flag that decides whether the MENU key
-   leaves an add-in, only one to read it.  This is Simon Lothar's routine
-   (the version the fx-CG50 fork of Utilities uses): it finds the flag by
-   looking at the code of syscall 0x1E99. */
+/* Legacy direct flag routine, adapted from Simon Lothar's published code and
+   the fx-CG50 fork of Utilities. The documented OS enable syscall is also
+   called when leaving; this legacy routine is retained for compatibility.
+   Its licensing requires review before publication: THIRD_PARTY_NOTICES.md. */
 static unsigned int set_menu_return_flag(unsigned int enabled)
 {
 #ifndef HOST_TEST
@@ -2030,7 +2144,7 @@ static void leave_to_menu(void)
         if (!menu_timer_fired) {
             px_fill(0, 0, VIS_W - 1, VIS_H - 1, COL_BG);
             mini_text(24, 80 - font_off, "PRESS THE MENU KEY TO LEAVE",
-                      COL_BOXFG, COL_BG);
+                      COL_CURSOR, COL_BG);
             Bdisp_PutDisp_DD();
             GetKeyWait_OS(&col, &row, KEYWAIT_HALTON_TIMERON, 3600, 0, &keycode);
         }
@@ -2154,7 +2268,8 @@ static void handle_key(int k)
 /* one run of the program: comes back when the user asks to leave */
 static void run_wireworld(void)
 {
-    int i, last_render = 0;
+    int i, last_render = 0, render_pending = 0;
+    SpeedClock clock = { 0, 0, 0, 1 };
 
     zoom         = 1;
     hdr_on       = 1;
@@ -2192,8 +2307,8 @@ static void run_wireworld(void)
     if (i < 0) {                       /* not even the smallest one fits */
         px_fill(0, 0, VIS_W - 1, VIS_H - 1, COL_BG);
         mini_text(4, row_y(2, 0), "NOT ENOUGH MEMORY FOR THE FIELD",
-                  COL_HDRFG, COL_BG);
-        mini_text(4, row_y(2, 1), "PRESS ANY KEY", COL_BOXDIM, COL_BG);
+                  COL_CURSOR, COL_BG);
+        mini_text(4, row_y(2, 1), "PRESS ANY KEY", COL_CURSOR, COL_BG);
         Bdisp_PutDisp_DD();
         wait_release();
         wait_any_key();
@@ -2218,7 +2333,7 @@ static void run_wireworld(void)
 
     for (;;) {
         int k = poll_key();
-        int need = 0;
+        int need = 0, stepped = 0;
 
         if (k == KEY_PRGM_EXIT) {
             if (anchor_on) {
@@ -2241,29 +2356,42 @@ static void run_wireworld(void)
         }
         if (quit_now) break;
 
-        if (running) {
+        if (speed_clock_due(&clock, running, speed_ips[speed], RTC_GetTicks())) {
             step_frame();
+            stepped = 1;
+            if (hdr_on || d_any) render_pending = 1;
+            if (!running) need = 1; /* automatic stop must show its toast */
             ips_count++;
-            if (RTC_Elapsed_ms(ips_start, 1000)) {
+            if (rtc_elapsed_ms(ips_start, 1000)) {
                 ips_measured = ips_count;
                 ips_count = 0;
                 ips_start = RTC_GetTicks();
             }
-            if (speed_ips[speed]) OS_InnerWait_ms(1000 / speed_ips[speed]);
         }
 
-        if (toast_on && RTC_Elapsed_ms(toast_start, 1600)) {
+        if (toast_on && rtc_elapsed_ms(toast_start, 1600)) {
             toast_on = 0;
             need = 1;
         }
 
-        if (need || d_any || ov_any ||
-            (running && RTC_Elapsed_ms(last_render, 33))) {
+        /* ov_any is the previous frame's overlay footprint, not a request
+           for a new frame. It is restored only when something actually
+           changes. While running, coalesce dirty cells for up to 33 ms. */
+        if (need || (!running && d_any) ||
+            (running && render_pending && rtc_elapsed_ms(last_render, 33))) {
             render_frame();
+            render_pending = 0;
             last_render = RTC_GetTicks();
         }
 
+        /* Keep the physical frame black even when the image is idle, without
+           pushing an unchanged 384x216 screen to the display controller. */
+        if (rtc_elapsed_ms(last_frame_draw, 250)) {
+            last_frame_draw = RTC_GetTicks();
+            DrawFrame(COL_BG);
+        }
         if (!running) OS_InnerWait_ms(10);
+        else if (speed_ips[speed] && !stepped) OS_InnerWait_ms(5);
     }
 }
 
@@ -2278,7 +2406,7 @@ int main(void)
 
     vram = (unsigned short *)GetVRAMAddress();
 
-    measure_font();          /* sets font_h / row_h / hdr_h */
+    /* Bitmap font metrics are fixed, so no OS font probe is needed. */
 
     /* An add-in must never return from main: the OS then keeps thinking it
        is running and refuses to start it again until another add-in has

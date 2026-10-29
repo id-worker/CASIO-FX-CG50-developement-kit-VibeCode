@@ -1,80 +1,82 @@
-# Casio fx-CG50 Add-in Suite (`ObjView`, `PyCEdit`, `Wireworld`, `win_gint`)
+# Casio fx-CG50 Add-in Suite
 
-A collection of native `.g3a` add-ins and developer tools for the **CASIO fx-CG50** graphing calculator, with C/Python source code. Several earlier builds were tested on real hardware with **OS 3.81 / `03.81.0202`**; see each project for the status of newer versions.
+A collection of native `.g3a` programs and developer resources for the
+**CASIO fx-CG50**. Suite release **v1.01** collects the five programs below;
+the release number is separate from each application's own version.
+The interface of the calculator programs is in English; detailed guides are
+mostly in Russian.
 
-> **Русское описание находится ниже / Russian description below.**
+> **Testing status:** these new builds passed computer-side checks. GraphLab
+> and Wireworld also have synthetic SuperH/QEMU tests, and ObjView's modifier
+> regression was checked with the actual gint key code under QEMU. Full testing
+> of these exact new files on physical hardware has not been confirmed. Earlier
+> versions were tested on a real fx-CG50; that does not prove these new builds.
+> Keep backups of working add-ins and data before updating.
 
----
+## Applications in v1.01
 
-## Included Projects & Ready-to-Install `.g3a` Binaries (`releases/` + per-project folders)
+| Application | Version | Description |
+|---|---:|---|
+| [GraphLab](GraphLab/README.md) | 1.09 | 2D/3D graphs, implicit equations and fractals; longer formula entry, monochrome UI and approximate 3D point preview. |
+| [Wireworld](Wireworld/README.md) | 1.65 | A wrapping Wireworld field, patterns and editing tools; monochrome interface with the three simulation colors retained. |
+| [PyCEdit](PyCEdit/README_RU.md) | 1.12 | Editor for `.py`, `.c` and `.txt`; monochrome panels and retained syntax highlighting. |
+| [Translator](Translator/README.md) | 1.11 | Offline Russian ↔ English translation, mostly white UI; requires `TDIC.DAT`. |
+| [ObjView](ObjView/README_RU.md) | 2.23 | Wavefront `.obj` viewer; monochrome panels, preserved model shading, and ALPHA/F3 filename-mode switching. |
 
-| File / Folder | Version | SDK | Description |
-| :--- | :---: | :---: | :--- |
-| **`ObjView/`** (`releases/ObjView.g3a`) | `v2.21` | `gint` + `fxSDK` | High-speed artifact-free **3D Wavefront `.obj` viewer** with Q16.16 ILRAM Z-buffer, Sutherland–Hodgman near-plane & 2D viewport clipping, Half-Lambert lighting, horizon-locked 6-DOF camera, `[SLW]`/`[FST]` speed modes, and optional `OPTN` 116 MHz turbo toggle. Includes `obj_viewer.py` for **PythonExtra** & **Windows IDLE** plus `.obj` test meshes (`torus.obj`, `spot.obj`, `teapot.obj`); see the notices for each model’s provenance. |
-| **`PyCEdit/`** (`releases/PyCEdit.g3a`) | `v1.11` | `libfxcg` | On-calculator **Python (`.py`) & PicoC (`.c`) code editor** styled after `PythonExtra`, featuring syntax highlighting, selection, clipboard copy/cut/paste, auto-indent, instant file extension switcher (`.py` / `.c` / `.txt`), and instant flicker-free OS Main Menu switching. |
-| **`Wireworld/`** (`releases/Wireworld.g3a`) | `v1.63` | `libfxcg` | Full-screen **Wireworld cellular automaton** (384×216 RGB565) on a wrapping torus up to `512×256` cells with dirty-rect + active-head sparse stepping, built-in logic gate circuits (Clock, Diode, OR, XOR, Memory), region Copy/Cut/Paste with 90° rotation & mirror flip, persistent `.ww` save/load, and instant OS Main Menu switching. |
-| **`win_gint/`** | `v1.1` | Python 3 (`ctypes` Win32 GDI32) | Zero-dependency **Windows Python IDLE compatibility layer** implementing `gint` (`384×216` RGB565 window + 16-bit Z-buffer `dtri_zbuf`) and `time`/`utime` so fx-CG50 `PythonExtra` scripts run directly on a Windows PC at 60+ FPS without changes. |
-| **`docs/`** | — | — | Comprehensive Russian guide & 544-function reference for **PicoC** on fx-CG50 (`picoc_guide.txt`) plus a compact ASCII pocket cheat-sheet (`picoc_pocket_en.txt`) readable directly inside `PyCEdit`. |
+The [`releases/`](releases/) folder contains the current `.g3a` files. The
+[v1.01 GitHub release](https://github.com/id-worker/CASIO-FX-CG50-developement-kit-VibeCode/releases/tag/v1.01)
+provides a small installation bundle and individual files. The older v1.0
+release is retained. [`Wireworld_1.64/`](Wireworld_1.64/) is historical and
+is not the new version.
 
-### More projects / Другие проекты
+## Installation
 
-- **[GraphLab 1.06](GraphLab/README.md)** — 2D/3D graphing and fractals. Hardware testing of this version has not been confirmed / проверка этой версии на калькуляторе не подтверждена.
-- **[Translator 1.10](Translator/README.md)** — offline RU↔EN translation; tested on hardware. Dictionary attribution and the menu-return code require further review.
-- **[Wireworld 1.64](Wireworld_1.64/README.md)** — sources and experimental build kept separately from the hardware-tested 1.63. Version 1.64 has not yet been tested on a physical calculator.
+1. Back up your existing `.g3a` files and important data, including GraphLab
+   `GLAB*.DAT` / `GLQ8*.DAT`, `Wireworld.ww`, code files and 3D models.
+2. Copy the desired `.g3a` files to the root of the calculator's USB storage.
+   For Translator, also copy [`TDIC.DAT`](Translator/TDIC.DAT) to the root; it
+   is unchanged from 1.10. Eject the calculator safely.
+3. In ObjView, copy `ObjView/models/torus.obj` to the root and enter `torus`
+   without the extension. The filename input supports Latin letters, digits,
+   `.`, `-`, `_`, and `/` as a path separator; spaces, parentheses and Cyrillic
+   are not available. ALPHA/F3 cycle input modes. ALPHA in the model viewer
+   controls slow **movement**, not rotation speed.
+4. GraphLab 1.09 imports older saved settings into its separate `GLAB4_A/B.DAT`
+   journal. Old versions do not read GLAB4; see its guide before switching.
 
-The licensing and provenance review notes accompany each project; a warning is not a substitute for permission. See also [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+## Дополнительно по-русски
 
-> **Two companion repositories** (kept separate because they carry different upstream licenses):
-> - **PythonExtra** (prebuilt `pe-0.4.0-beta` binaries; upstream PythonExtra/MicroPython use MIT) → see sibling repository [`PythonExtra-4.0-beta-FX-CG50`](https://github.com/id-worker/PythonExtra-4.0-beta-FX-CG50)
-> - **Utilities** (modified fork of [gbl08ma/utilities](https://github.com/gbl08ma/utilities), **GNU GPL v2**) → see sibling repository [`Utilities`](https://github.com/id-worker/Utilities)
+**v1.01** — версия всего набора, а не номер каждого аддина. Пять программ:
+GraphLab 1.09, Wireworld 1.65, PyCEdit 1.12, Translator 1.11 и ObjView 2.23.
+До установки новых сборок сохрани прежние `.g3a` и важные файлы на ПК. Полная
+проверка именно новых файлов на калькуляторе не подтверждена; проверка в QEMU
+не заменяет устройство. Инструкции и ограничения приведены по ссылкам в
+таблице выше. Для Translator нужен `TDIC.DAT` в корне накопителя.
 
----
+Также в репозитории остаются [`win_gint/`](win_gint/) для Windows Python и
+[`docs/`](docs/) с русскими материалами по PicoC. Они не заменяют отдельные
+репозитории [PythonExtra](https://github.com/id-worker/PythonExtra-4.0-beta-FX-CG50)
+и [Utilities](https://github.com/id-worker/Utilities).
 
-## Quick Installation on Casio fx-CG50
+## Building from source
 
-1. Connect the calculator to your PC via USB and press **`F1`** (*USB Flash*).
-2. Copy `ObjView.g3a`, `PyCEdit.g3a`, and/or `Wireworld.g3a` from `releases/` into the root directory of the calculator drive. Utilities and PythonExtra are available in their separate companion repositories linked above; sample `.obj` files are in `ObjView/models/`.
-3. Safely eject the USB drive — the icons will appear in the Casio **Main Menu**.
+- GraphLab and ObjView: install fxSDK/gint, enter the corresponding project
+  folder and run `fxsdk build-cg`.
+- Wireworld and PyCEdit: install a compatible libfxcg/PrizmSDK toolchain and
+  `mkg3a`; set `FXCGSDK`, then run `make` in the project folder.
+- Translator: see [`source/README_BUILD.txt`](Translator/source/README_BUILD.txt)
+  for its libfxcg build. Individual project READMEs cover tests and caveats.
 
----
+## Licenses and provenance
 
-## Набор аддинов и утилит для Casio fx-CG50 (RU)
+Original code is offered under the [MIT License](LICENSE), including the
+`Alex Work` copyright credit. Third-party components and data retain their
+own terms: see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the
+project-specific notices and licenses. The Translator dictionary's precise
+attribution/license provenance and a menu-return code fragment in some
+projects remain unresolved; warnings do not themselves grant rights.
 
-Подборка нативных `.g3a`-аддинов и инструментов для **CASIO fx-CG50**. Некоторые предыдущие сборки проверены на реальном калькуляторе с **OS 3.81**; статус новых версий указан отдельно:
-
-1. **`ObjView` (`releases/ObjView.g3a`, `v2.21`)** — 3D-просмотрщик моделей и карт Wavefront `.obj` без визуальных артефактов (16-битный Z-буфер в быстрой памяти ILRAM, точное отсечение ближней плоскостью и границами экрана, освещение Half-Lambert, 6-DOF камера с ровным горизонтом, точный шаг `[SLW]` на `ALPHA` без замедления поворота камеры, разгон `OPTN` 58/116 МГц и чистый выход в главное меню). В папке также лежит порт `obj_viewer.py` для `PythonExtra` / ПК и тестовые 3D-модели (`torus.obj`, `spot.obj`, `teapot.obj`); происхождение и права отдельных моделей описаны в `THIRD_PARTY_NOTICES.md`.
-2. **`PyCEdit` (`releases/PyCEdit.g3a`, `v1.11`)** — текстовый редактор кода `.py` / `.c` / `.txt` в визуальном стиле `PythonExtra` с подсветкой синтаксиса, автоотступами, буфером обмена, быстрой сменой расширений файлов и мгновенным бесшовным выходом в меню ОС без мигания экрана.
-3. **`Wireworld` (`releases/Wireworld.g3a`, `v1.63`)** — клеточный автомат Wireworld на весь экран (`384×216`) с бесшовным тороидальным полем до `512×256`, встроенными логическими схемами, копированием/вставкой участков с поворотом и зеркалированием, сохранением/загрузкой `Wireworld.ww` и мгновенным выходом в меню ОС.
-4. **`win_gint/`** — библиотека совместимости `gint` + `utime` на чистом Win32 GDI32 (`ctypes`) для запуска графических и 3D-скриптов `PythonExtra` прямо из **Windows Python IDLE** без сторонних пакетов.
-5. **`docs/`** — подробный учебник и справочник по языку **PicoC** на калькуляторе (`picoc_guide.txt`) и компактная английская шпаргалка (`picoc_pocket_en.txt`) для чтения с экрана самого калькулятора.
-
-> **Две отдельные репозитории-спутника** (вынесены, потому что у них свои лицензии апстримов):
-> - **PythonExtra** (готовые бинарники `pe-0.4.0-beta`; апстрим PythonExtra/MicroPython — MIT) → репозиторий [`PythonExtra-4.0-beta-FX-CG50`](https://github.com/id-worker/PythonExtra-4.0-beta-FX-CG50)
-> - **Utilities** (патченый форк [gbl08ma/utilities](https://github.com/gbl08ma/utilities), **GNU GPL v2**) → репозиторий [`Utilities`](https://github.com/id-worker/Utilities)
-
----
-
-## Building from Source
-
-- **`ObjView`** (`gint` + `fxSDK` + `sh-elf-gcc`):
-  ```bash
-  cd ObjView
-  fxsdk build-cg
-  ```
-- **`PyCEdit`** & **`Wireworld`** (`libfxcg` + `sh3eb-elf-gcc` + `mkg3a`):
-  ```bash
-  export FXCGSDK=/path/to/libfxcg
-  make -C PyCEdit
-  make -C Wireworld
-  ```
-
----
-
-## License & Credits
-
-- Original portions of the code in this repository are offered under the **MIT License** — see [`LICENSE`](LICENSE). Third-party components retain their terms; unresolved provenance is described in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
-- **Companion repositories with their own upstream licenses** (not included here):
-  - **[`Utilities`](https://github.com/id-worker/Utilities)** — modified fork of [`gbl08ma/utilities`](https://github.com/gbl08ma/utilities) under **GNU GPL v2** (ships its own `LICENSE`, source files, and `PATCHNOTES.md` change notice; correspondence to a particular binary remains to be verified).
-  - **[`PythonExtra-4.0-beta-FX-CG50`](https://github.com/id-worker/PythonExtra-4.0-beta-FX-CG50)** — prebuilt PythonExtra and MicroPython binaries (upstream MIT, with separate terms potentially applying to linked components). See its repository for provenance and notices.
-- Compiled `.g3a` binaries link against open-source community SDKs (**`gint`**, **`fxSDK`**, **`OpenLibm`**, **`fxlibc`**, **`libfxcg`**, **`mkg3a`**, and GCC `libgcc` with its Runtime Library Exception). Identified copyright notices, licenses, attributions, and unresolved review items are documented in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
-- *CASIO, PRIZM, and fx-CG50 are trademarks of CASIO COMPUTER CO., LTD. Unofficial third-party software.*
+PythonExtra and the GPL Utilities fork are maintained in their separate
+repositories and are not included in this release bundle. CASIO, PRIZM and
+fx-CG50 are trademarks of CASIO COMPUTER CO., LTD.; this is unofficial
+third-party software.

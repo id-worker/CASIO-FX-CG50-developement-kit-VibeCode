@@ -4,9 +4,9 @@
 #include <stddef.h>
 
 /* Limits are deliberately small enough for the calculator. */
-#define EXPR_MAX 160
-#define EXPR_NODES 128
-#define EXPR_CODE 128
+#define EXPR_MAX 768
+#define EXPR_NODES 256
+#define EXPR_CODE 256
 #define EXPR_STACK 64
 #define EXPR_DEPTH 32
 /* Bounds renderer/compiler recursion on gint's 16 KiB stack, including
@@ -80,11 +80,25 @@ int expr_compile(Parsed const *p, Program *out, char *error, size_t error_size);
 float expr_eval_real(Program const *program, EvalVars const *vars);
 Complex expr_eval_complex(Program const *program, EvalVars const *vars);
 int expr_program_uses(Program const *program, VarId var);
+/* Conservative whitelist: true only for expressions composed from globally
+   continuous real operations. False means unknown, not necessarily a pole. */
+int expr_program_continuous(Program const *program);
+/* Prove a declared x period for a conservative subset of bytecode. A false
+   result merely disables reuse; it never says the expression is nonperiodic. */
+int expr_proves_x_period(Program const *program,EvalVars const *base,float period);
 /* True only for finite residuals satisfying a strict/non-strict relation. */
 int expr_relation_true(Relation relation,float residual);
 /* Compile f(x) only when the whole input safely means y=f(x) or y REL f(x).
    A reversed comparison, such as f(x)<y, is normalized to y>f(x). */
 int expr_compile_explicit_y(Parsed const *p,Program *out,Relation *normalized);
+/* Compile the height function in z=f(x,y), f(x,y)=z, or a bare expression
+   independent of z. Inequalities and equations still containing z are not
+   accepted; they must use the general renderer. */
+int expr_compile_explicit_z(Parsed const *p,Program *out);
+/* For 3D surface search: safely replace an equality of the form g^k=0 or abs(g)=0
+   (positive integer k) with g=0. This exposes sign changes that the finite
+   ray sampler would otherwise miss. Returns 0 if no such rewrite applies. */
+int expr_compile_zero_surface(Parsed const *p,Program *out);
 /* Single-letter variable names, including e/i when locally bound by SUM. */
 int expr_var_id(char letter);
 /* Iteration and convergence limits are deliberately bounded for fx-CG50.

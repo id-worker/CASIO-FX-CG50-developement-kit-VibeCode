@@ -1,6 +1,10 @@
 /*
- * ObjView v2.1 Turbo -- High-Speed Artifact-Free 3D Wavefront .obj Viewer
+ * ObjView v2.23 Turbo -- High-Speed Artifact-Free 3D Wavefront .obj Viewer
  * Target: Casio fx-CG50 (OS 3.80 / 3.81 compatible via gint@dev)
+ *
+ * v2.23: treat ALPHA as a key in the filename prompt, so it cycles the
+ * input mode like F3. SHIFT remains a gint modifier. The model-viewer ALPHA
+ * controls and the rendering pipeline are unchanged.
  *
  * Fixes & upgrades in v2.1:
  *   - Horizon-locked (yaw, pitch, roll) 6-DOF free-fly camera (zero axis drift!)
@@ -228,11 +232,11 @@ static const char *parse_face_v(const char *s, int n_verts_so_far, int *v_idx)
 
 static void draw_banner(const char *title, const char *sub)
 {
-    dclear(gray_pal[29]);
+    dclear(C_WHITE);
     drect_border(34, 72, DWIDTH - 35, 148, C_WHITE, 2, C_BLACK);
     drect(34, 72, DWIDTH - 35, 92, C_BLACK);
     dtext(44, 77, C_WHITE, title);
-    if (sub) dtext(44, 108, gray_pal[5], sub);
+    if (sub) dtext(44, 108, C_BLACK, sub);
     dupdate();
 }
 
@@ -668,28 +672,28 @@ static int prompt_filename(char *out_name, int max_len, const char *err_msg, int
 
     while (1) {
         char line[96];
-        dclear(gray_pal[29]);
+        dclear(C_WHITE);
         drect(0, 0, DWIDTH - 1, 16, C_BLACK);
-        dtext(6, 3, C_WHITE, "ObjView 2.21 Turbo (.obj)");
-        drect(DWIDTH - 42, 2, DWIDTH - 5, 14, C_RGB(4, 12, 26));
+        dtext(6, 3, C_WHITE, "ObjView 2.23 Turbo (.obj)");
+        drect_border(DWIDTH - 42, 2, DWIDTH - 5, 14, C_BLACK, 1, C_WHITE);
         dtext(DWIDTH - 36, 3, C_WHITE, mnames[mode]);
 
-        dtext(18, 36, gray_pal[4], "Enter .obj file name (without .obj):");
+        dtext(18, 36, C_BLACK, "Enter .obj file name (without .obj):");
         drect_border(18, 56, DWIDTH - 19, 82, C_WHITE, 1, C_BLACK);
         snprintf(line, sizeof(line), "%s_", buf);
         dtext(24, 64, C_BLACK, line);
         snprintf(line, sizeof(line), "Target: /%s.obj", buf[0] ? buf : "<name>");
-        dtext(24, 88, gray_pal[12], line);
+        dtext(24, 88, C_BLACK, line);
 
         if (err_msg && err_msg[0])
-            dtext(18, 112, C_RED, err_msg);
+            dtext(18, 112, C_BLACK, err_msg);
 
-        dtext(18, 138, gray_pal[9], "EXE: Open  DEL: Erase  ALPHA/F3: abc/ABC/123");
-        dtext(18, 154, gray_pal[9], "F4: '_'    F5: '/'     MENU/EXIT: Main Menu");
+        dtext(18, 138, C_BLACK, "EXE: Open  DEL: Erase  ALPHA/F3: abc/ABC/123");
+        dtext(18, 154, C_BLACK, "F4: '_'    F5: '/'     MENU/EXIT: Main Menu");
 
         const char *fk[6] = { "OPEN", "", "a/A/1", "_", "/", allow_cancel ? "BACK" : "MENU" };
         drect(0, DHEIGHT - 18, DWIDTH - 1, DHEIGHT - 1, C_WHITE);
-        dhline(DHEIGHT - 19, gray_pal[18]);
+        dhline(DHEIGHT - 19, C_BLACK);
         for (int i = 0; i < 6; i++) {
             if (!fk[i][0]) continue;
             int x1 = i * 64 + 8, x2 = (i + 1) * 64 + 3;
@@ -702,7 +706,8 @@ static int prompt_filename(char *out_name, int max_len, const char *err_msg, int
         dupdate();
 
         restore_stock_clock();
-        key_event_t ev = getkey_opt(GETKEY_MOD_SHIFT | GETKEY_MOD_ALPHA, NULL);
+        /* ALPHA switches the input mode here; gint must return it as a key. */
+        key_event_t ev = getkey_opt(GETKEY_MOD_SHIFT, NULL);
         apply_active_clock();
         int k = ev.key;
         int len = (int)strlen(buf);
@@ -740,7 +745,6 @@ static int prompt_filename(char *out_name, int max_len, const char *err_msg, int
         } else {
             ch = key_letter(k);
             if (ch && (mode == 1 || ev.shift)) ch = ch - 'a' + 'A';
-            else if (!ch && ev.alpha) ch = key_digit_sym(k);
         }
         if (ch && len < 56) {
             buf[len] = (char)ch;
@@ -1178,11 +1182,11 @@ int main(void)
                          is_slow ? " SLW" : (shift_held ? " FST" : ""));
                 dtext(4, 2, C_WHITE, hleft);
                 snprintf(hright, sizeof(hright), "%dms V:%d F:%d", last_ms, model.n_verts, model.n_tris);
-                dtext_opt(DWIDTH - 4, 2, gray_pal[24], C_NONE, DTEXT_RIGHT, DTEXT_TOP, hright, -1);
+                dtext_opt(DWIDTH - 4, 2, C_WHITE, C_NONE, DTEXT_RIGHT, DTEXT_TOP, hright, -1);
 
-                drect(0, VIEW_BOT + 1, DWIDTH - 1, DHEIGHT - 1, gray_pal[26]);
-                dhline(VIEW_BOT + 1, gray_pal[18]);
-                dtext(4, DHEIGHT - 12, gray_pal[4],
+                drect(0, VIEW_BOT + 1, DWIDTH - 1, DHEIGHT - 1, C_WHITE);
+                dhline(VIEW_BOT + 1, C_BLACK);
+                dtext(4, DHEIGHT - 12, C_BLACK,
                       "F1:Wire F2:Flip F3:Rst F4:Open ALPHA:Slow OPTN:CPU");
                 dupdate();
                 dirty = 0;

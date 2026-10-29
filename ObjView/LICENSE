@@ -1,0 +1,42 @@
+MIT License
+
+Copyright (c) 2026 Contributors
+Alex Work
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+-------------------------------------------------------------------------------
+Note on Linked Runtime Libraries & Third-Party Notices:
+The compiled .g3a binaries in this repository link against open-source SDK
+libraries for Casio fx-CG50 (gint, fxlibc, OpenLibm, libfxcg, and libgcc).
+Please see THIRD_PARTY_NOTICES.md for their respective copyright notices,
+licenses, and community attributions, which must be retained alongside binary
+redistributions.
+
+Directory- and component-specific terms:
+- Utilities is a GPL-licensed fork in the separate repository
+  https://github.com/id-worker/Utilities; see its LICENSE and PATCHNOTES.md.
+- PythonExtra is in the separate repository
+  https://github.com/id-worker/PythonExtra-4.0-beta-FX-CG50. Its upstream
+  PythonExtra and MicroPython use MIT; linked components can have other terms.
+- Translator/TDIC.DAT is dictionary data with separate terms and attribution
+  questions; see Translator/LICENSE_DATA.txt and
+  Translator/PUBLICATION_REVIEW_RU.md.
+- Third-party code, libraries and assets retain their own terms. Unresolved
+  provenance is documented in THIRD_PARTY_NOTICES.md and project notices.

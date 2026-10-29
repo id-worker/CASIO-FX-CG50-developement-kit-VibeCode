@@ -1,16 +1,16 @@
-Translator 1.10 — source and rebuilding (Linux)
+Translator 1.11 — source and rebuilding (Linux)
 ================================================
 
-The installation files Translator.g3a and TDIC.DAT sit at the ZIP root;
-this source folder is not needed to install the app on a calculator.
+The installation files are provided separately; TDIC.DAT is unchanged from
+1.10 and is not duplicated in the small source archive.
 
 Own code: ../LICENSE. Dictionary: ../LICENSE_DATA.txt. Dependencies and
 notices: ../THIRD_PARTY_NOTICES.txt and ../licenses/.
 
 Build the add-in:
   * Use a big-endian sh3eb-elf GCC toolchain, libfxcg and mkg3a.
-    The shipped binary was built with GCC 12.4.0, libfxcg rebuilt without
-    -flto, and mkg3a. A symlink libgcc_be.a -> libgcc.a may be necessary.
+    The 1.11 binary was built with GCC 14.1.0, libfxcg v0.6 rebuilt
+    without -flto, and mkg3a. The Makefile detects libgcc_be or libgcc.
   * Set FXCGSDK to the libfxcg directory and put the cross-compiler and
     mkg3a on PATH. From this source directory run: make
   * tools/fix_g3a.py is called automatically by make after mkg3a; it

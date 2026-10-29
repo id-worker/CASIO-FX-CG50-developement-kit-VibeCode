@@ -38,7 +38,9 @@ void Cursor_SetFlashOff(void) { }
 int DefineStatusAreaFlags(int mode, int flags, char *c1, char *c2)
 { (void)mode; (void)flags; (void)c1; (void)c2; return 0; }
 void DisplayStatusArea(void) { }
-void DrawFrame(int color) { (void)color; }
+static unsigned frame_border_calls;
+void DrawFrame(int color) { (void)color; frame_border_calls++; }
+unsigned host_drawframe_count(void) { return frame_border_calls; }
 
 /* rough: one 6x9 block per character, so overlapping text is detectable */
 void PrintMini(int *x, int *y, const char *MB_string, int mode_flags,
@@ -63,13 +65,14 @@ void PrintMini(int *x, int *y, const char *MB_string, int mode_flags,
     *x += len * 6;
 }
 
-/* RTC ticks at 128 Hz */
-int RTC_GetTicks(void) { return (int)(host_ms * 16 / 125); }
+/* RTC ticks at 128 Hz and resets each midnight, as on the Prizm. */
+int RTC_GetTicks(void) { return (int)(((host_ms % 86400000L) * 16) / 125); }
+void host_set_clock_ms(long value) { host_ms = value; }
 
 int RTC_Elapsed_ms(int start, int ms)
 {
     long d = (long)RTC_GetTicks() - (long)start;
-    if (d < 0) d += 0x1000000L;
+    if (d < 0) d += 86400L * 128;
     return (d * 125 / 16) >= ms;
 }
 

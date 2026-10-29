@@ -198,7 +198,7 @@ static void draw_node(Draw *d,int k,int x,int y,int depth)
             break;
         }
         case N_HOLE:
-            if(!d->dry)drect_border(x,y,x+n->width-1,y+n->height-1,C_WHITE,1,C_LIGHT);
+            if(!d->dry)drect_border(x,y,x+n->width-1,y+n->height-1,C_WHITE,1,C_BLACK);
             mark(d,n->start,x+1,y,n->height);break;
         case N_NUM:case N_VAR:case N_CONST_I:case N_RAW:
             slice(d->p,n->start,n->end,tmp,EXPR_MAX);text(d,x,y,tmp,n->start,n->end);break;
@@ -274,7 +274,7 @@ static void draw_node(Draw *d,int k,int x,int y,int depth)
                 slice(d->p,n->index_start,n->index_end,tmp,EXPR_MAX);
                 text(d,ix,lower+baseline-(ih-3),tmp,n->index_start,n->index_end);
             } else {
-                if(!d->dry)drect_border(ix,lower,ix+iw-1,lower+ih-1,C_WHITE,1,C_LIGHT);
+                if(!d->dry)drect_border(ix,lower,ix+iw-1,lower+ih-1,C_WHITE,1,C_BLACK);
                 mark(d,n->index_start,ix,lower,ih);
             }
             text(d,ix+iw,lower+baseline-(eh-3),"=",-1,-1);

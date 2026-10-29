@@ -421,6 +421,24 @@ int expr_compile(Parsed const *p, Program *out, char *error, size_t error_size)
     return 1;
 }
 int expr_program_uses(Program const *p, VarId v) { return (p->variables & (1u<<v)) != 0; }
+int expr_program_continuous(Program const *p)
+{
+    if(!p||p->size==0||p->size>EXPR_CODE)return 0;
+    for(int i=0;i<p->size;i++){
+        Instr const *in=&p->code[i];
+        switch(in->op){
+        case I_NUM:if(!isfinite(in->number))return 0;break;
+        case I_VAR:case I_NEG:case I_ADD:case I_SUB:case I_MUL:
+        case I_SQUARE:case I_CUBE:break;
+        case I_FUNC:
+            if(in->aux!=F_SIN&&in->aux!=F_COS&&in->aux!=F_ATAN&&in->aux!=F_ABS&&
+               in->aux!=F_MIN&&in->aux!=F_MAX&&in->aux!=F_RE&&in->aux!=F_IM&&in->aux!=F_CONJ)return 0;
+            break;
+        default:return 0;
+        }
+    }
+    return 1;
+}
 int expr_relation_true(Relation relation,float value)
 {
     if(!isfinite(value))return 0;
@@ -453,6 +471,53 @@ int expr_compile_explicit_y(Parsed const *p,Program *out,Relation *normalized)
     if(normalized)*normalized=relation;
     return 1;
 }
+int expr_compile_explicit_z(Parsed const *p,Program *out)
+{
+    if(!p||!out||p->error||p->root<0||p->root>=p->count)return 0;
+    ExprNode const *root=&p->nodes[p->root];int k=p->root;
+    if(root->kind==N_EQ){
+        if(root->aux!=REL_EQ)return 0;
+        int left=ungroup(p,root->left),right=ungroup(p,root->right);
+        if(left>=0&&p->nodes[left].kind==N_VAR&&p->nodes[left].aux==V_Z)k=root->right;
+        else if(right>=0&&p->nodes[right].kind==N_VAR&&p->nodes[right].aux==V_Z)k=root->left;
+        else return 0;
+    }
+    memset(out,0,sizeof *out);int sp=0,max=0;
+    if(!build(p,out,k,&sp,&max)||sp!=1||out->has_equal||expr_program_uses(out,V_Z)){
+        memset(out,0,sizeof *out);return 0;
+    }
+    out->max_stack=(uint16_t)max;return 1;
+}
+int expr_compile_zero_surface(Parsed const *p,Program *out)
+{
+    if(!p||!out||p->error||p->root<0||p->root>=p->count)return 0;
+    ExprNode const *root=&p->nodes[p->root];
+    if(root->kind!=N_EQ||root->aux!=REL_EQ)return 0;
+    int left=ungroup(p,root->left),right=ungroup(p,root->right),k=-1;
+    if(left>=0&&p->nodes[left].kind==N_NUM&&p->nodes[left].value==0)k=right;
+    else if(right>=0&&p->nodes[right].kind==N_NUM&&p->nodes[right].value==0)k=left;
+    if(k<0)return 0;
+    int changed=0;
+    for(;;){
+        k=ungroup(p,k);if(k<0||k>=p->count)return 0;
+        ExprNode const *n=&p->nodes[k];
+        if(n->kind==N_FUNC&&n->aux==F_ABS){k=n->left;changed=1;continue;}
+        if(n->kind==N_POW){
+            int r=ungroup(p,n->right);
+            if(r>=0&&p->nodes[r].kind==N_NUM){
+                float exponent=p->nodes[r].value;
+                if(exponent>=2&&exponent<=16&&exponent==floorf(exponent)){
+                    k=n->left;changed=1;continue;
+                }
+            }
+        }
+        break;
+    }
+    if(!changed)return 0;
+    memset(out,0,sizeof *out);int sp=0,max=0;
+    if(!build(p,out,k,&sp,&max)||sp!=1||out->has_equal){memset(out,0,sizeof *out);return 0;}
+    out->has_equal=1;out->relation=REL_EQ;out->max_stack=(uint16_t)max;return 1;
+}
 
 static float eval_func_real(int f,float a,float b)
 {
@@ -466,6 +531,92 @@ static float eval_func_real(int f,float a,float b)
         case F_MIN:return a<b?a:b; case F_MAX:return a>b?a:b; case F_ATAN2:return atan2f(a,b);
         default:return NAN;
     }
+}
+/* Track a constant shift when x becomes x+period. This intentionally proves
+   only common forms: sums/products by known constants and sin/cos of an
+   affine phase. Unknown bytecode disables reuse rather than guessing. */
+typedef struct { float delta,number; unsigned char shift,constant,uses_x; } PeriodTerm;
+static int period_turns(float delta,float cycle)
+{
+    if(!isfinite(delta)||!isfinite(cycle)||cycle<=0)return 0;
+    if(delta==0)return 1;
+    float turns=delta/cycle;
+    if(!isfinite(turns)||fabsf(turns)>1000000)return 0;
+    float nearest=roundf(turns);
+    /* A tiny but nonzero phase shift is not a zero-turn period. Accepting
+       it would incorrectly tile slowly varying functions such as sin(1e-8x). */
+    return nearest!=0&&fabsf(turns-nearest)<=0.000001f;
+}
+int expr_proves_x_period(Program const *p,EvalVars const *base,float period)
+{
+    if(!p||!base||!isfinite(period)||period<=0||p->size==0||p->size>EXPR_CODE)return 0;
+    if(!expr_program_uses(p,V_X))return 1;
+    PeriodTerm st[EXPR_STACK];int sp=0;
+    for(int i=0;i<p->size;i++){
+        Instr const *in=&p->code[i];PeriodTerm a,b,r={0};
+        switch(in->op){
+        case I_NUM:
+            if(sp>=EXPR_STACK||!isfinite(in->number))return 0;
+            st[sp++]=(PeriodTerm){0,in->number,1,1,0};break;
+        case I_VAR:
+            if(sp>=EXPR_STACK||in->aux>=V_COUNT)return 0;
+            if(in->aux==V_X)st[sp++]=(PeriodTerm){period,0,1,0,1};
+            else if(in->aux==V_Y||in->aux==V_Z)st[sp++]=(PeriodTerm){0,0,1,0,0};
+            else if(isfinite(base->v[in->aux]))st[sp++]=(PeriodTerm){0,base->v[in->aux],1,1,0};
+            else return 0;
+            break;
+        case I_NEG:
+            if(sp<1)return 0;
+            if(st[sp-1].shift)st[sp-1].delta=-st[sp-1].delta;
+            if(st[sp-1].constant)st[sp-1].number=-st[sp-1].number;
+            break;
+        case I_SQUARE:case I_CUBE:
+            if(sp<1)return 0;
+            a=st[sp-1];r.uses_x=a.uses_x;
+            if(a.shift&&a.delta==0){r.shift=1;r.delta=0;}
+            if(a.constant){r.constant=1;r.number=in->op==I_SQUARE?a.number*a.number:a.number*a.number*a.number;}
+            st[sp-1]=r;break;
+        case I_FUNC:
+            if(sp<1)return 0;
+            b=(PeriodTerm){0,0,1,1,0};
+            if(is_binary_func(in->aux)){if(sp<2)return 0;b=st[--sp];}
+            a=st[sp-1];r.uses_x=(unsigned char)(a.uses_x||b.uses_x);
+            if(a.constant&&b.constant){r.number=eval_func_real(in->aux,a.number,b.number);r.constant=(unsigned char)isfinite(r.number);}
+            if(!r.uses_x){r.shift=1;r.delta=0;}
+            else if((in->aux==F_SIN||in->aux==F_COS)&&a.shift&&period_turns(a.delta,6.2831853071795864769f)){
+                r.shift=1;r.delta=0;
+            }else if((in->aux==F_ABS||in->aux==F_ATAN||in->aux==F_MIN||in->aux==F_MAX||
+                      in->aux==F_RE||in->aux==F_IM||in->aux==F_CONJ)&&
+                     a.shift&&a.delta==0&&b.shift&&b.delta==0){r.shift=1;r.delta=0;}
+            st[sp-1]=r;break;
+        case I_ADD:case I_SUB:case I_MUL:case I_DIV:case I_POW:
+            if(sp<2)return 0;
+            b=st[--sp];a=st[sp-1];r.uses_x=(unsigned char)(a.uses_x||b.uses_x);
+            if(a.constant&&b.constant){
+                switch(in->op){
+                case I_ADD:r.number=a.number+b.number;break;
+                case I_SUB:r.number=a.number-b.number;break;
+                case I_MUL:r.number=a.number*b.number;break;
+                case I_DIV:r.number=b.number!=0?a.number/b.number:NAN;break;
+                default:r.number=powf(a.number,b.number);break;
+                }
+                r.constant=(unsigned char)isfinite(r.number);
+            }
+            if(!r.uses_x){r.shift=1;r.delta=0;}
+            else if(in->op==I_ADD||in->op==I_SUB){
+                if(a.shift&&b.shift){r.delta=a.delta+(in->op==I_ADD?b.delta:-b.delta);r.shift=(unsigned char)isfinite(r.delta);}
+            }else if(in->op==I_MUL){
+                if(a.shift&&b.shift&&a.delta==0&&b.delta==0){r.shift=1;r.delta=0;}
+                else if(a.constant&&b.shift){r.delta=a.number*b.delta;r.shift=(unsigned char)isfinite(r.delta);}
+                else if(b.constant&&a.shift){r.delta=b.number*a.delta;r.shift=(unsigned char)isfinite(r.delta);}
+            }else if(in->op==I_DIV){
+                if(b.constant&&b.number!=0&&a.shift){r.delta=a.delta/b.number;r.shift=(unsigned char)isfinite(r.delta);}
+            }else if(a.shift&&a.delta==0&&b.constant&&b.number>=0&&floorf(b.number)==b.number){r.shift=1;r.delta=0;}
+            st[sp-1]=r;break;
+        default:return 0;
+        }
+    }
+    return sp==1&&st[0].shift&&st[0].delta==0;
 }
 typedef struct {int work,depth;} EvalCtx;
 static float factorial_real(float value)

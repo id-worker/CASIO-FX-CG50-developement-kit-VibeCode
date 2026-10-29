@@ -36,16 +36,16 @@
 
 #define COL_BLACK       0x0000
 #define COL_WHITE       0xFFFF
-#define COL_BORDER      RGB565(205, 212, 222)
-#define COL_SEL_BG      RGB565(186, 214, 255)
-#define COL_ACCENT      RGB565(24,  76,  170)
-#define COL_HDR_BADGE   RGB565(40,  110, 220)
-#define COL_HDR_STEM    RGB565(230, 130, 20)
-#define COL_KEY_BG      RGB565(236, 238, 241)
-#define COL_KEY_BD      RGB565(170, 176, 186)
-#define COL_KEY_LB      RGB565(40,  46,  56)
-#define COL_MUTED       RGB565(120, 130, 145)
-#define COL_ERR         RGB565(190, 40,  30)
+#define COL_BORDER      COL_BLACK
+#define COL_SEL_BG      COL_BLACK
+#define COL_ACCENT      COL_BLACK
+#define COL_HDR_BADGE   COL_WHITE
+#define COL_HDR_STEM    COL_BLACK
+#define COL_KEY_BG      COL_WHITE
+#define COL_KEY_BD      COL_BLACK
+#define COL_KEY_LB      COL_BLACK
+#define COL_MUTED       COL_BLACK
+#define COL_ERR         COL_BLACK
 
 #define HDR_Y           0
 #define HDR_H           16
@@ -661,14 +661,14 @@ static void paint_header(void)
     px_rect(0, HDR_Y, VIS_W - 1, HDR_Y + HDR_H - 1, COL_BLACK);
     draw_text("Translator", 3, 1, COL_WHITE, 94);
     px_rect(99, 1, 149, 14, COL_HDR_BADGE);
-    draw_text_c(dir_sec ? "RU>EN" : "EN>RU", 99, 1, 51, COL_WHITE);
-    px_rect(153, 1, 211, 14, COL_KEY_BD);
+    draw_text_c(dir_sec ? "RU>EN" : "EN>RU", 99, 1, 51, COL_BLACK);
+    px_rect(153, 1, 211, 14, COL_WHITE);
     draw_text_c(kbd_lang ? "kbd RU" : "kbd EN", 153, 1, 59, COL_BLACK);
-    px_rect(215, 1, 248, 14, COL_KEY_BD);
+    px_rect(215, 1, 248, 14, COL_WHITE);
     draw_text_c(kbd_lang ? "123" : (alpha_lock ? "ABC" : "123"),
                 215, 1, 34, COL_BLACK);
     if (focus == F_KB) {
-        px_rect(252, 1, 294, 14, COL_KEY_BD);
+        px_rect(252, 1, 294, 14, COL_WHITE);
         draw_text_c("keys", 252, 1, 43, COL_BLACK);
     }
     if (match_capped) strcpy(num, "500+");
@@ -773,7 +773,7 @@ static void layout_entry(EntryLayout *e, const char *key, const char *body)
     e->count = (unsigned short)n;
 }
 
-static void draw_entry_line(const EntryLayout *e, int line, int y)
+static void draw_entry_line(const EntryLayout *e, int line, int y, int inverted)
 {
     const char *p = e->text + e->start[line];
     const char *end = e->text + e->end[line];
@@ -781,8 +781,8 @@ static void draw_entry_line(const EntryLayout *e, int line, int y)
     while (p < end && x + CELL_W <= VIS_W - 4) {
         int pos = (int)(p - e->text);
         unsigned code = utf8_next(&p);
-        unsigned short col = pos < e->key_end ? COL_ACCENT :
-                             pos < e->body_start ? COL_MUTED : COL_BLACK;
+        unsigned short col = inverted ? COL_WHITE : COL_BLACK;
+        (void)pos;
         draw_glyph_at(glyph_for(code), x, y, col);
         x += CELL_W;
     }
@@ -819,14 +819,14 @@ static PageInfo visit_page(PageStart start, int draw)
                 if (idx == sel) {
                     px_rect(0, y, VIS_W - 1, y + ROW_H - 1, COL_SEL_BG);
                     if (focus == F_LIST)
-                        px_rect(0, y, 2, y + ROW_H - 1, COL_ACCENT);
+                        px_rect(0, y, 2, y + ROW_H - 1, COL_WHITE);
                 }
                 if (j == take - 1 && take == remain)
                     px_rect(0, y + ROW_H - 1, VIS_W - 1,
                             y + ROW_H - 1, COL_BORDER);
                 /* Text after the separator preserves the bottom pixels of
                    descenders such as g, p, q, y and Cyrillic letters. */
-                draw_entry_line(e, line + j, y);
+                draw_entry_line(e, line + j, y, idx == sel);
             }
         }
         info.last_entry = idx;
@@ -898,7 +898,7 @@ static void paint_keyboard(void)
             x = 2 + c * 38;
             w = kb_span(r, c) * 38 - 2;
             if (focus == F_KB && gx == c && gy == r) {
-                bg = COL_SEL_BG; bd = COL_ACCENT; lb = COL_BLACK;
+                bg = COL_BLACK; bd = COL_BLACK; lb = COL_WHITE;
             }
             px_rect(x, y, x + w - 1, y + ROW_H - 1, bg);
             px_box(x, y, x + w - 1, y + ROW_H - 1, bd);
@@ -938,7 +938,7 @@ static void paint_detail(void)
         int y = INP_Y + 3 + row * ROW_H;
         if (det_top == 0 && row == 0)
             px_rect(0, y, VIS_W - 1, y + ROW_H - 1, COL_SEL_BG);
-        draw_entry_line(e, det_top + row, y);
+        draw_entry_line(e, det_top + row, y, det_top == 0 && row == 0);
     }
     draw_text_c("up/down scroll  F5/F6 page  EXIT back", 0,
                 FKEY_Y - 16, VIS_W, COL_MUTED);

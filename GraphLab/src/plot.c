@@ -71,11 +71,12 @@ static int root_on_edge(Field *f,Sample a,Sample b,int dims,Sample *r)
 /* Only reuse declared periods when exactly aligned to the sample grid.
    A period of zero disables user-declared reuse. A proven x-independent
    program is safely reused regardless of the user setting. */
-static int x_period_steps(Program const *pr,float period,float dx,int n)
+static int x_period_steps(Program const *pr,EvalVars const *base,float period,float dx,int n)
 {
     if(!expr_program_uses(pr,V_X))return 1;
     if(!isfinite(period) || period<=0 || !isfinite(dx) || dx<=0)return 0;
     float steps=period/dx;if(steps<1 || steps>(float)n)return 0;
+    if(!expr_proves_x_period(pr,base,period))return 0;
     int count=(int)lroundf(steps);
     return fabsf(steps-count)<=0.000001f?count:0;
 }
@@ -92,7 +93,7 @@ int plot_contour_opt(Program const *pr, EvalVars const *base,PlaneView const *vi
     float *prev=rows,*next=rows+n+1;
     Field f={.pr=pr,.vars=*base,.implicit=pr->has_equal || expr_program_uses(pr,V_Y)};
     float dx=(view->xmax-view->xmin)/n,dy=(view->ymax-view->ymin)/m;
-    int period=x_period_steps(pr,view->period_x,dx,n);
+    int period=x_period_steps(pr,base,view->period_x,dx,n);
     for(int ix=0;ix<=n;ix++) {
         if((ix%32)==0 && progress && !progress(0,m,progress_ctx)){stats->canceled=1;stats->evaluations=f.evaluations;free(rows);return 0;}
         prev[ix]=period && ix>=period?prev[ix-period]:sample_2d(&f,view->xmin+dx*ix,view->ymax);stats->samples++;
@@ -205,7 +206,7 @@ int plot_surface(Mesh *mesh,Program const *pr,EvalVars const *base,Volume const 
     float *grid=malloc(plane*2*sizeof(float));if(!grid)return -2;
     float *prev=grid,*next=grid+plane;
     Field f={.pr=pr,.vars=*base,.implicit=pr->has_equal || expr_program_uses(pr,V_Z)};
-    float step=2*v->radius/n;int period=x_period_steps(pr,v->period_x,step,n);
+    float step=2*v->radius/n;int period=x_period_steps(pr,base,v->period_x,step,n);
     static const int co[8][3]={{0,0,0},{1,0,0},{1,1,0},{0,1,0},{0,0,1},{1,0,1},{1,1,1},{0,1,1}};
     static const int ts[6][4]={{0,5,1,6},{0,1,2,6},{0,2,3,6},{0,3,7,6},{0,7,4,6},{0,4,5,6}};
     /* For explicit z=f(x,y), reuse a previous sample with an increment.
@@ -643,6 +644,6 @@ void render3_axes(Camera const *cam)
 {
     Render3D r;if(!camera_prepare(&r,cam))return;
     struct dwindow old=dwindow_set((struct dwindow){PLOT_X0,PLOT_Y0,PLOT_X1+1,PLOT_Y1+1});
-    axis_draw(&r,0,C_RED);axis_draw(&r,1,C_RGB(0,18,0));axis_draw(&r,2,C_BLUE);
+    axis_draw(&r,0,C_BLACK);axis_draw(&r,1,C_BLACK);axis_draw(&r,2,C_BLACK);
     dwindow_set(old);
 }

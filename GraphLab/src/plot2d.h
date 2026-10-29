@@ -23,4 +23,12 @@ int plot_explicit_y(Program const *rhs,Relation relation,EvalVars const *base,
                     PlaneView const *view,int width,int height,
                     SegmentFn segment,void *segment_ctx,SpanFillFn fill,void *fill_ctx,
                     ProgressFn progress,void *progress_ctx,PlotStats *stats);
+/* Optional caller-owned cache indexed by offset+x. known is a byte per sample;
+   NaN results can therefore be cached too. Caller invalidates it whenever x
+   coordinates, formula, or parameters change, and shifts it on whole-pixel pans. */
+int plot_explicit_y_cached(Program const *rhs,Relation relation,EvalVars const *base,
+                    PlaneView const *view,int width,int height,
+                    SegmentFn segment,void *segment_ctx,SpanFillFn fill,void *fill_ctx,
+                    ProgressFn progress,void *progress_ctx,PlotStats *stats,
+                    float *cache,unsigned char *known,int offset,int capacity);
 #endif

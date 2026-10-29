@@ -101,7 +101,7 @@ int main(void){
     if(ray3d_render(&rs,1,&v,&vol,&cam,NULL,NULL,&rstats)!=1 || rstats.hits<2000 || gint_vram[center]==C_WHITE)return 44;
     if(guarded_vram[0]!=0x5aa5 || guarded_vram[DWIDTH*DHEIGHT+1]!=0x5aa5)return 45;
     if(!compile("y<x"))return 49;
-    Program rhs;Relation rel;if(!expr_compile_explicit_y(&p,&rhs,&rel)||rel!=REL_LT)return 50;
+    static Program rhs;Relation rel;if(!expr_compile_explicit_y(&p,&rhs,&rel)||rel!=REL_LT)return 50;
     if(!expr_relation_true(REL_LT,-1)||expr_relation_true(REL_LT,0)||expr_relation_true(REL_LE,NAN))return 51;
     plane=(PlaneView){-2,2,-2,2,64,64,0};segments=0;
     if(plot_explicit_y(&rhs,rel,&v,&plane,386,181,segment,NULL,NULL,NULL,NULL,NULL,&stats)!=1 || segments<300)return 52;
@@ -121,7 +121,7 @@ int main(void){
     if(layout_cursor_step(&p,6,1)!=13 || layout_delete_start(&p,13)!=13)return 68;
     if(!compile("prod(1,5,n,n)") || fabsf(expr_eval_real(&pr,&v)-120)>.001f)return 69;
     if(!expr_parse(&p,"prod(1,5,n,)",1) || !layout_measure(&p) || layout_sum_field(&p,11,NULL)!=3)return 70;
-    GraphState nstate={0};
+    static GraphState nstate;memset(&nstate,0,sizeof nstate);
     nstate.volume_radius=3;nstate.camera_yaw=.75f;nstate.camera_pitch=.55f;nstate.camera_zoom=1;
     nstate.eye_x=1;nstate.eye_y=2;nstate.eye_z=3;nstate.follow_eye=1;
     if(!navigation_step(&nstate,NAV_FORWARD|NAV_UP|NAV_RISE,1,0))return 64;

@@ -48,10 +48,16 @@ void ww_free(WWWorld *w);
 /* wipes the field (all cells empty, generation back to 0) */
 void ww_clear(WWWorld *w);
 
-/* Advances the world by one generation, in place.  Returns the number of
+/* Advances the world by one generation, in place. Returns the number of
    changed cells (0 means nothing will ever move again without editing).
-   `hook` may be NULL. */
+   `hook` may be NULL. A non-NULL hook keeps the original v1.63 behaviour,
+   even if it modifies the world while receiving notifications. */
 int ww_step(WWWorld *w, WWCellHook hook, void *ctx);
+
+/* Same operation and callback order, optimized for read-only hooks. A hook
+   passed here MUST NOT modify w or its cells while a step is in progress.
+   The Wireworld UI's dirty-rectangle hook satisfies this contract. */
+int ww_step_readonly_hook(WWWorld *w, WWCellHook hook, void *ctx);
 
 static __inline__ int ww_get(const WWWorld *w, int x, int y)
 {

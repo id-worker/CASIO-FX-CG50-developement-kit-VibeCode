@@ -20,6 +20,16 @@ static void capture(GraphState *s,char const *path){
     assert(fgets(header,sizeof header,f)&&!strcmp(header,"255\n"));
     assert(fread(image,1,sizeof image,f)==sizeof image);fclose(f);unlink(path);
 }
+static void capture3d(GraphState *s,char const *path){
+    assert(storage_save(s)==0);
+    key_event_t keys[]={K(F2),K(F6),K(F6),K(EXIT),K(EXIT),K(F6)};
+    host_keys(keys,sizeof keys/sizeof keys[0]);host_snapshot_on_getkey(3,path);
+    assert(graphlab_main()==0&&host_keys_used()==sizeof keys/sizeof keys[0]);
+    assert(host_calculation_count()==1&&host_partial_updates()==0&&host_vram_guards_ok());
+    FILE *f=fopen(path,"rb");assert(f);char header[64];
+    assert(fgets(header,sizeof header,f)&&fgets(header,sizeof header,f)&&fgets(header,sizeof header,f));
+    assert(fread(image,1,sizeof image,f)==sizeof image);fclose(f);unlink(path);
+}
 static int color(int x,int y,int c){
     size_t i=((size_t)y*DWIDTH+x)*3;
     int r=((c>>11)&31)*255/31,g=((c>>5)&63)*255/63,b=(c&31)*255/31;
@@ -36,7 +46,16 @@ int main(void){
     assert(color(210,80,C_RGB(31,25,25)));assert(color(280,80,C_WHITE));
     int blue=0;for(int y=66;y<=72;y++)for(int x=235;x<=241;x++)blue+=color(x,y,C_RGB(2,10,26));
     assert(blue>0); /* later equality boundary remains above shaded area */
-    char path[256];snprintf(path,sizeof path,"%s/GLAB3_A.DAT",dir);unlink(path);
-    snprintf(path,sizeof path,"%s/GLAB3_B.DAT",dir);unlink(path);rmdir(dir);
-    puts("2D UI pixel checks: explicit/implicit inequality fill and overlay boundary passed.");
+    static unsigned char sphere[DWIDTH*DHEIGHT*3];
+    state_defaults(&s);s.render3_mode=1;strcpy(s.surface[0].formula,"x^2+y^2+z^2=1");
+    capture3d(&s,"/tmp/gl-sphere.ppm");memcpy(sphere,image,sizeof sphere);
+    strcpy(s.surface[0].formula,"(x^2+y^2+z^2-1)^2=0");
+    capture3d(&s,"/tmp/gl-squared-sphere.ppm");assert(!memcmp(sphere,image,sizeof sphere));
+    s.render3_mode=0;strcpy(s.surface[0].formula,"x^2+y^2+z^2=1");
+    capture3d(&s,"/tmp/gl-voxel-sphere.ppm");memcpy(sphere,image,sizeof sphere);
+    strcpy(s.surface[0].formula,"(x^2+y^2+z^2-1)^2=0");
+    capture3d(&s,"/tmp/gl-voxel-squared-sphere.ppm");assert(!memcmp(sphere,image,sizeof sphere));
+    char path[256];snprintf(path,sizeof path,"%s/GLAB4_A.DAT",dir);unlink(path);
+    snprintf(path,sizeof path,"%s/GLAB4_B.DAT",dir);unlink(path);rmdir(dir);
+    puts("UI pixels: 2D inequality overlays and equivalent RAY/VOXEL zero-surface formula passed.");
 }

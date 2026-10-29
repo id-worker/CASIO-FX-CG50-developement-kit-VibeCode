@@ -27,7 +27,7 @@ SOURCES  := src
 INCLUDES :=
 
 #---------------------------------------------------------------------------------
-MKG3AFLAGS := -n basic:Wireworld -V 1.63 \
+MKG3AFLAGS := -n basic:Wireworld -n internal:WIREWORLD -V 1.65 \
               -i uns:../unselected.bmp -i sel:../selected.bmp
 
 CFLAGS   = -Os -Wall $(MACHDEP) $(INCLUDE) -ffunction-sections -fdata-sections
@@ -36,10 +36,11 @@ CXXFLAGS = $(CFLAGS) -fno-exceptions
 LDFLAGS  = $(MACHDEP) -T$(FXCGSDK)/toolchain/prizm.x -Wl,-static -Wl,-gc-sections
 
 GCCLIB   := $(shell $(CC) $(MACHDEP) -print-file-name=libgcc_be.a 2>/dev/null)
-ifeq ($(notdir $(GCCLIB)),libgcc_be.a)
-LIBS     := -Wl,--start-group -lc -lfxcg -lgcc_be -Wl,--end-group
-else
+# A missing -print-file-name result is the literal "libgcc_be.a", not a path.
+ifeq ($(GCCLIB),libgcc_be.a)
 LIBS     := -Wl,--start-group -lc -lfxcg -lgcc -Wl,--end-group
+else
+LIBS     := -Wl,--start-group -lc -lfxcg -lgcc_be -Wl,--end-group
 endif
 
 #---------------------------------------------------------------------------------
@@ -88,6 +89,9 @@ else
 DEPENDS := $(OFILES:.o=.d)
 
 $(OUTPUT).g3a: $(OUTPUT).bin
+	$(MKG3A) $(MKG3AFLAGS) $< $@
+	python3 $(CURDIR)/../tools/fix_g3a.py $@
+
 $(OUTPUT).bin: $(OFILES)
 
 -include $(DEPENDS)

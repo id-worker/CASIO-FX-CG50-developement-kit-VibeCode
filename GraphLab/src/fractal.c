@@ -35,26 +35,56 @@ int fractal_point(Program const *pr,EvalVars const *base,float re,float im,Fract
     if(!pr||!base||!view || view->iterations<1 || view->iterations>512 || !isfinite(view->escape_radius) || view->escape_radius<=0)return -1;
     return point(pr,base,re,im,view,polynomial_kind(pr),NULL,NULL,0,0);
 }
-int fractal_generate(Program const *pr,EvalVars const *base,FractalView const *v,
-                     FractalBlockFn paint,void *paint_ctx,ProgressFn progress,void *progress_ctx)
+static int floor_div(int a,int b)
+{
+    int q=a/b,r=a%b;
+    return r<0?q-1:q;
+}
+int fractal_generate_region(Program const *pr,EvalVars const *base,FractalView const *v,
+                            int x0,int y0,int x1,int y1,int phase_x,int phase_y,
+                            FractalBlockFn paint,void *paint_ctx,
+                            ProgressFn progress,void *progress_ctx)
 {
     if(!pr||!base||!v||!paint||v->iterations<1||v->iterations>512||v->block<1||v->block>12 ||
        !isfinite(v->cx)||!isfinite(v->cy)||!isfinite(v->units_per_pixel)||v->units_per_pixel<=0 ||
        !isfinite(v->escape_radius)||v->escape_radius<=0)return -1;
-    int block=v->block,rows=(PLOT_H+block-1)/block,fast=polynomial_kind(pr);
-    for(int j=0;j<rows;j++) {
-        if(progress && !progress(j,rows,progress_ctx))return 0;
-        int py=PLOT_Y0+j*block,h=PLOT_Y1-py+1;if(h>block)h=block;
-        for(int px=PLOT_X0;px<=PLOT_X1;px+=block) {
-            if(((px-PLOT_X0)/block)%32==0 && progress && !progress(j,rows,progress_ctx))return 0;
-            int w=PLOT_X1-px+1;if(w>block)w=block;
-            float x=v->cx+((float)px+w*0.5f-(PLOT_X0+PLOT_X1)*0.5f)*v->units_per_pixel;
-            float y=v->cy-((float)py+h*0.5f-(PLOT_Y0+PLOT_Y1)*0.5f)*v->units_per_pixel;
-            int iteration=point(pr,base,x,y,v,fast,progress,progress_ctx,j,rows);
+    if(x0<PLOT_X0)x0=PLOT_X0;
+    if(y0<PLOT_Y0)y0=PLOT_Y0;
+    if(x1>PLOT_X1)x1=PLOT_X1;
+    if(y1>PLOT_Y1)y1=PLOT_Y1;
+    if(x0>x1||y0>y1)return 1;
+    int block=v->block,fast=polynomial_kind(pr);
+    /* Normalize before adding coordinates, even if the caller passed a large
+       accumulated pan. The same lattice is reused after every integer shift. */
+    phase_x%=block;if(phase_x<0)phase_x+=block;
+    phase_y%=block;if(phase_y<0)phase_y+=block;
+    int anchor_x=PLOT_X0+phase_x,anchor_y=PLOT_Y0+phase_y;
+    int first_x=anchor_x+floor_div(x0-anchor_x,block)*block;
+    int first_y=anchor_y+floor_div(y0-anchor_y,block)*block;
+    int rows=(y1-first_y)/block+1,row=0;
+    for(int gy=first_y;gy<=y1;gy+=block,row++){
+        if(progress&&!progress(row,rows,progress_ctx))return 0;
+        int painted=0;
+        for(int gx=first_x;gx<=x1;gx+=block,painted++){
+            if((painted%32)==0 && progress&&!progress(row,rows,progress_ctx))return 0;
+            /* Sample the center of the full conceptual block, not the center
+               of its clipped fragment at a screen or exposed-strip edge. */
+            float x=v->cx+((float)gx+block*.5f-(PLOT_X0+PLOT_X1)*.5f)*v->units_per_pixel;
+            float y=v->cy-((float)gy+block*.5f-(PLOT_Y0+PLOT_Y1)*.5f)*v->units_per_pixel;
+            int iteration=point(pr,base,x,y,v,fast,progress,progress_ctx,row,rows);
             if(iteration<0)return 0;
-            paint(px,py,w,h,iteration,paint_ctx);
+            int ax=gx<x0?x0:gx,ay=gy<y0?y0:gy;
+            int bx=gx+block-1>x1?x1:gx+block-1;
+            int by=gy+block-1>y1?y1:gy+block-1;
+            paint(ax,ay,bx-ax+1,by-ay+1,iteration,paint_ctx);
         }
     }
-    if(progress && !progress(rows,rows,progress_ctx))return 0;
+    if(progress&&!progress(rows,rows,progress_ctx))return 0;
     return 1;
+}
+int fractal_generate(Program const *pr,EvalVars const *base,FractalView const *v,
+                     FractalBlockFn paint,void *paint_ctx,ProgressFn progress,void *progress_ctx)
+{
+    return fractal_generate_region(pr,base,v,PLOT_X0,PLOT_Y0,PLOT_X1,PLOT_Y1,0,0,
+                                   paint,paint_ctx,progress,progress_ctx);
 }

@@ -39,6 +39,19 @@ int main(void){
     explicit_("y=sin(2*pi*x)");v=(PlaneView){0,4,-2,2,64,64,1};c=(Collector){0};
     assert(plot_explicit_y(&rhs,relation,&vars,&v,385,181,line,&c,NULL,NULL,NULL,NULL,&stats)==1);
     assert(stats.evaluations<=98); /* 1 unit = 96 pixels, plus occasional midpoints */
+    /* Cache stores finite and NaN column values; a vertical pan requires no
+       new f(x) evaluations, a 45px horizontal pan only the exposed columns. */
+    explicit_("y=sin(x)");v=(PlaneView){-4,4,-2,2,64,64,0};c=(Collector){0};
+    float cached[386]={0};unsigned char known[386]={0};
+    assert(plot_explicit_y_cached(&rhs,relation,&vars,&v,386,181,line,&c,NULL,NULL,NULL,NULL,&stats,cached,known,0,386)==1);
+    assert(stats.evaluations==386);
+    v.ymin+=.5f;v.ymax+=.5f;c=(Collector){0};
+    assert(plot_explicit_y_cached(&rhs,relation,&vars,&v,386,181,line,&c,NULL,NULL,NULL,NULL,&stats,cached,known,0,386)==1);
+    assert(stats.evaluations==0);
+    memmove(cached,cached+45,(386-45)*sizeof *cached);memmove(known,known+45,386-45);memset(known+386-45,0,45);
+    float delta=45*(v.xmax-v.xmin)/385.0f;v.xmin+=delta;v.xmax+=delta;c=(Collector){0};
+    assert(plot_explicit_y_cached(&rhs,relation,&vars,&v,386,181,line,&c,NULL,NULL,NULL,NULL,&stats,cached,known,0,386)==1);
+    assert(stats.evaluations==45);
     v=(PlaneView){-2,2,-2,2,64,64,0};c=(Collector){0};
     assert(plot_explicit_y(&rhs,relation,&vars,&v,386,181,line,&c,NULL,NULL,cancel,NULL,&stats)==0&&stats.canceled);
     puts("Explicit 2D column path: isolated inequalities, strict fill, clipping, pole guard, period reuse and cancellation passed.");

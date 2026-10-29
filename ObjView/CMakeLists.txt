@@ -15,6 +15,6 @@ target_link_libraries(objview Gint::Gint -lm -lc)
 
 if("${FXSDK_PLATFORM_LONG}" STREQUAL fxCG50)
   generate_g3a(TARGET objview OUTPUT "${CMAKE_SOURCE_DIR}/ObjView.g3a"
-    NAME "ObjView" VERSION "02.21.0000"
+    NAME "ObjView" VERSION "02.23.0000"
     ICONS assets-cg/icon-uns.png assets-cg/icon-sel.png)
 endif()

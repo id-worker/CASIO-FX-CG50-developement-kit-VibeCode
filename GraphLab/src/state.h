@@ -22,7 +22,7 @@ typedef struct {
     /* Explicit former v2 tail padding; v3 fields start after the old state. */
     uint8_t reserved_v2[3];
     uint8_t curve_width; /* 1..5 pixels */
-    uint8_t reserved_v3[3]; /* former v3 tail padding */
+    uint8_t reserved_v3[3]; /* transient checked Q; authenticated by 1.08 sidecar */
     uint8_t render3_mode; /* 0 voxels, 1 rays */
     uint8_t voxel_div; /* grid cells/side, 6..64 */
     uint8_t accuracy2; /* 0,1,2,3 => 0.25,0.5,1,2 screen pixels */
@@ -30,5 +30,10 @@ typedef struct {
 } GraphState;
 void state_defaults(GraphState *s);
 void state_default_eye(GraphState *s);
+/* Q is carried in previously reserved v3 bytes while detail3 remains a
+   valid old-version preset. A matching 1.08 sidecar authenticates it on load;
+   arbitrary old padding or a save changed by an old version falls back. */
+int state_ray_quality(GraphState const *s);
+int state_set_ray_quality(GraphState *s,int q);
 int state_validate(GraphState const *s);
 #endif

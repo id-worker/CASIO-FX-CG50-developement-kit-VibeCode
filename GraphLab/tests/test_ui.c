@@ -143,6 +143,15 @@ int main(void) {
     assert(st.detail3==2 && st.eye_x!=3 && st.eye_y!=4 && st.eye_z>5);
     assert(host_calculation_count()==2 && host_text_seen("3D VALUES") && host_text_seen("zero on surface"));
     assert(host_text_seen("Q20") && host_text_seen("Q32") && host_text_seen("SETTINGS"));
+    /* After a completed image, movement draws only cached visible points;
+       no formula calculation is started until PLOT is pressed again. */
+    GraphState preview_state;state_defaults(&preview_state);preview_state.render3_mode=1;
+    strcpy(preview_state.surface[0].formula,"x^2+y^2+z^2=1");assert(storage_save(&preview_state)==0);
+    key_event_t preview_ray[]={K(F2),K(F6),K(F6),K(RIGHT),K(UP),K(1),K(F6),K(EXIT),K(EXIT),K(F6)};
+    run(preview_ray,N(preview_ray));assert(host_calculation_count()==2&&host_text_seen("PREVIEW"));
+    strcpy(preview_state.surface[0].formula,"x^2+y^2+z^2<=1");assert(storage_save(&preview_state)==0);
+    key_event_t preview_voxel[]={K(F2),K(F6),K(F6),K(RIGHT),K(F6),K(EXIT),K(EXIT),K(F6)};
+    run(preview_voxel,N(preview_voxel));assert(host_calculation_count()==2&&host_text_seen("PREVIEW")&&host_text_seen("V20*"));
     /* 3D arrows always turn; 1/0 move vertically without a mode switch.
        Held SHIFT accelerates both distinct presses without affecting turning. */
     GraphState fresh;state_defaults(&fresh);assert(storage_save(&fresh)==0);
@@ -179,6 +188,13 @@ int main(void) {
     run(width,N(width));st=load();
     assert(st.curve_width==5 && host_calculation_count()==1 && host_text_seen("2D line width (px)"));
     /* Cancellation is tested during actual calculations in all three modes. */
+    state_defaults(&fresh);assert(storage_save(&fresh)==0);
+    key_event_t cancel2d_pan[]={K(F1),K(F6),K(F6),K(RIGHT),K(EXIT),K(F6)};
+    host_keys(cancel2d_pan,N(cancel2d_pan));host_async_on_calculation((key_event_t){.key=KEY_EXIT,.type=KEYEV_DOWN},2,1);
+    assert(graphlab_main()==0&&host_keys_used()==N(cancel2d_pan)&&host_calculation_count()==2&&host_partial_updates()==0&&host_vram_guards_ok());
+    key_event_t cancelf_pan[]={K(F3),K(F6),K(F6),K(RIGHT),K(EXIT),K(F6)};
+    host_keys(cancelf_pan,N(cancelf_pan));host_async_on_calculation((key_event_t){.key=KEY_EXIT,.type=KEYEV_DOWN},2,1);
+    assert(graphlab_main()==0&&host_keys_used()==N(cancelf_pan)&&host_calculation_count()==2&&host_partial_updates()==0&&host_vram_guards_ok());
     key_event_t cancel2d[]={K(F1),K(F6),K(F6),K(EXIT),K(F6)};
     host_keys(cancel2d,N(cancel2d));host_async_key((key_event_t){.key=KEY_EXIT,.type=KEYEV_DOWN},5);
     assert(graphlab_main()==0 && host_keys_used()==N(cancel2d) && host_vram_guards_ok() && host_polls_outside_calculation()==0);
@@ -210,10 +226,27 @@ int main(void) {
     /* Step snaps to realizable N; renderer and 2D tolerance stay independent. */
     state_defaults(&fresh);assert(storage_save(&fresh)==0);
     key_event_t new_settings[]={K(OPTN),K(UP),K(EXE),S(DEL),K(1),K(EXE),
-        K(UP),K(RIGHT),K(UP),K(RIGHT),K(UP),K(RIGHT),K(F5),K(F6),K(F6)};
+        K(UP),K(RIGHT),K(UP),K(UP),K(RIGHT),K(UP),K(RIGHT),K(F5),K(F6),K(F6)};
     run(new_settings,N(new_settings));st=load();
     assert(st.follow_eye==0 && st.voxel_div==7 && st.render3_mode==1 && st.accuracy2==2);
     assert(host_text_seen("Voxel step (world)") && host_text_seen("2D accuracy (px)"));
+    /* Manual Q, invalid entry, saved custom value and stale-preview invalidation. */
+    state_defaults(&fresh);fresh.render3_mode=1;strcpy(fresh.surface[0].formula,"x^2+y^2+z^2=1");
+    assert(storage_save(&fresh)==0);
+    key_event_t quality[]={
+        K(OPTN),K(UP),K(UP),K(UP),K(EXE),S(DEL),K(1),K(7),K(EXE),K(RIGHT),
+        K(EXE),S(DEL),K(4),K(9),K(EXE),K(F5),K(F6),
+        K(F2),K(F6),K(F6),K(RIGHT),K(OPTN),K(UP),K(UP),K(UP),
+        K(EXE),S(DEL),K(1),K(3),K(EXE),K(F6),K(F6),K(EXIT),K(F5),K(EXIT),K(F6)
+    };
+    run(quality,N(quality));st=load();
+    assert(state_ray_quality(&st)==13&&host_calculation_count()==2);
+    assert(host_text_seen("Ray grid divisions")&&host_text_seen("Q18")&&host_text_seen("Q13")&&
+           host_text_seen("PREVIEW")&&host_text_seen("Ray grid requires an integer Q from 4 to 48."));
+    assert(state_set_ray_quality(&st,48)&&storage_save(&st)==0);
+    key_event_t quality_cycle[]={K(F2),K(F6),K(F4),K(F4),K(EXIT),K(F5),K(EXIT),K(F6)};
+    run(quality_cycle,N(quality_cycle));st=load();
+    assert(state_ray_quality(&st)==12&&host_text_seen("Q48")&&host_text_seen("Q4")&&host_text_seen("Q12"));
     /* An old moving/offset 1.03 domain is normalized once on load. Moving the
        camera afterwards cannot translate it; +/- do not change field of view. */
     state_defaults(&fresh);fresh.follow_eye=1;fresh.volume_x=8;fresh.volume_y=-4;fresh.volume_z=2;
@@ -231,6 +264,7 @@ int main(void) {
     assert(storage_save(&fresh)==0);
     key_event_t volume[]={K(F2),K(F6),K(F6),K(VARS),K(F6),K(EXIT),K(EXIT),K(F6)};
     run(volume,N(volume));assert(host_calculation_count()==1 && host_text_seen("V20*") && host_text_seen("TRUE"));
-    char path[256];snprintf(path,sizeof path,"%s/GLAB3_A.DAT",dir);unlink(path);snprintf(path,sizeof path,"%s/GLAB3_B.DAT",dir);unlink(path);rmdir(dir);
+    char path[256];snprintf(path,sizeof path,"%s/GLAB4_A.DAT",dir);unlink(path);snprintf(path,sizeof path,"%s/GLAB4_B.DAT",dir);unlink(path);
+    snprintf(path,sizeof path,"%s/GLQ8_A.DAT",dir);unlink(path);snprintf(path,sizeof path,"%s/GLQ8_B.DAT",dir);unlink(path);assert(rmdir(dir)==0);
     puts("Scripted UI: new/edit formula, ALPHA, sums, view selection, 2D/3D/fractal silent calculation/caching, move/turn, coordinates and cancellation passed.");
 }
