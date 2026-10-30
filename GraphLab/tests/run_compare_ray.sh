@@ -8,7 +8,7 @@ cc=${CC:-cc}
 for mode in fast reference; do
     def=''; [ "$mode" = reference ] && def='-DGL_DISABLE_TRIGFAST'
     "$cc" -std=c11 -DGL_HOST $def -O2 -Wall -Wextra -Werror -Wpedantic \
-      tests/test_ray_equivalence.c tests/host_gint.c src/ray.c src/trigfast.c src/preview3d.c src/expr.c -lm -o "$work/$mode"
+      tests/test_ray_equivalence.c tests/host_gint.c src/ray.c src/refine.c src/trigfast.c src/preview3d.c src/expr.c -lm -o "$work/$mode"
     "$work/$mode" "$work/$mode.rgb"
 done
 python3 - "$work/fast.rgb" "$work/reference.rgb" <<'PY'

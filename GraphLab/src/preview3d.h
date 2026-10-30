@@ -9,11 +9,14 @@
 #define PREVIEW3D_AUX_CAPACITY 2048
 typedef struct {int16_t x,y,z;uint16_t color;} Preview3DPoint;
 typedef struct {
-    Preview3DPoint *point;int count,capacity;
+    Preview3DPoint *point;int count,capacity,step;
     Preview3DPoint *aux;int aux_count,aux_seen;
     uint16_t *depth; /* allocated lazily, reused between preview frames */
     Volume volume;Camera captured;
 } Preview3D;
+/* 4 is the original 1.09 sampling; 8 is faster/coarser, 2 denser.
+   Set before recapture; a changed sampling requires a new final PLOT. */
+void preview3d_set_step(Preview3D *preview,int step);
 /* Initialize a zeroed object; failure merely disables the optional preview. */
 int preview3d_begin(Preview3D *preview,Volume const *volume,Camera const *captured);
 /* Reset the visible hits while optionally keeping the same-volume coarse

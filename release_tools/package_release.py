@@ -43,7 +43,8 @@ def main():
     for app in APPS:
         filename = app + '.g3a'
         data = (ROOT / 'releases' / filename).read_bytes()
-        if data != (ROOT / app / filename).read_bytes():
+        # GraphLab/ is now the later 1.20; releases/ remains the exact v1.02 set.
+        if app != 'GraphLab' and data != (ROOT / app / filename).read_bytes():
             raise SystemExit(f'Project and releases/{filename} differ')
         files[filename] = data
         individual[filename] = data
@@ -60,6 +61,8 @@ def main():
         for name in ('LICENSE', 'LICENSE_DATA.txt', 'THIRD_PARTY_NOTICES.md',
                      'THIRD_PARTY_NOTICES.txt', 'PUBLICATION_REVIEW_RU.md'):
             p = ROOT / app / name
+            if app == 'GraphLab' and name == 'THIRD_PARTY_NOTICES.md':
+                p = ROOT / 'release_tools/v1.02_GraphLab_THIRD_PARTY_NOTICES.md'
             if p.is_file():
                 files[f'notices/{app}/{name}'] = p.read_bytes()
         for dirname in ('third_party', 'licenses'):

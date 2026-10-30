@@ -1,45 +1,4 @@
 #!/bin/sh
-# Functional checks on the host. Does not emulate the calculator OS or hardware.
+# Compatibility entry point: run the current standard 1.20 host suite.
 set -eu
-cd "$(dirname "$0")/.."
-CC=${CC:-cc}
-work="${TMPDIR:-/tmp}/graphlab-host-test-$$"
-trap 'rm -rf "$work"' EXIT HUP INT TERM
-mkdir -p "$work"
-flags="-std=c11 -DGL_HOST -Wall -Wextra -Werror -Wpedantic -g -O1"
-if [ "${SANITIZE:-1}" = 1 ]; then flags="$flags -fsanitize=address,undefined -fno-omit-frame-pointer"; fi
-$CC $flags tests/test_expr.c src/expr.c -lm -o "$work/expr"
-$CC $flags tests/fuzz_expr.c src/expr.c -lm -o "$work/fuzz"
-$CC $flags tests/test_layout.c tests/host_gint.c src/layout.c src/expr.c -lm -o "$work/layout"
-$CC $flags tests/test_editor_navigation.c tests/host_gint.c src/layout.c src/expr.c -lm -o "$work/editor_navigation"
-$CC $flags tests/test_editor_meta.c tests/host_gint.c src/editor_meta.c src/layout.c src/expr.c -lm -o "$work/editor_meta"
-$CC $flags tests/fuzz_layout.c tests/host_gint.c src/layout.c src/expr.c -lm -o "$work/fuzz_layout"
-$CC $flags tests/test_plot.c tests/host_gint.c src/plot.c src/expr.c -lm -o "$work/plot"
-$CC $flags tests/test_axes3.c tests/host_gint.c src/plot.c src/expr.c -lm -o "$work/axes3"
-$CC $flags tests/test_plot2d.c src/plot2d.c src/expr.c -lm -o "$work/plot2d"
-$CC $flags tests/test_voxel.c tests/host_gint.c src/voxel.c src/preview3d.c src/expr.c -lm -o "$work/voxel"
-$CC $flags tests/test_ray.c tests/host_gint.c src/ray.c src/trigfast.c src/preview3d.c src/expr.c -lm -o "$work/ray"
-$CC $flags tests/test_ray_optimization.c tests/host_gint.c src/ray.c src/trigfast.c src/preview3d.c src/expr.c -lm -o "$work/ray_optimization"
-$CC $flags tests/test_fractal.c src/fractal.c src/expr.c -lm -o "$work/fractal"
-$CC $flags tests/test_scroll.c src/scroll.c -o "$work/scroll"
-$CC $flags tests/test_fractal_pan.c src/fractal.c src/scroll.c src/expr.c -lm -o "$work/fractal_pan"
-$CC $flags tests/test_preview3d.c tests/host_gint.c src/voxel.c src/ray.c src/trigfast.c src/preview3d.c src/expr.c -lm -o "$work/preview3d"
-$CC $flags tests/test_108_math.c tests/host_gint.c src/expr.c src/plot.c src/plot2d.c src/ray.c src/trigfast.c src/preview3d.c src/voxel.c -lm -o "$work/math108"
-$CC $flags tests/test_quality.c src/storage.c -Wl,--wrap=write -lm -o "$work/quality"
-$CC $flags tests/test_navigation.c tests/host_gint.c src/navigation.c src/navigation_input.c src/storage.c -lm -o "$work/navigation"
-$CC $flags tests/test_storage.c src/storage.c -lm -o "$work/storage"
-$CC $flags tests/test_storage_failures.c src/storage.c -Wl,--wrap=write -lm -o "$work/storage_failures"
-$CC $flags -Dmain=graphlab_main -c src/main.c -o "$work/ui_main.o"
-$CC $flags -Dmain=graphlab_main -DGL_EDITOR_TEST -DGL_EDITOR_TRACE -c src/main.c -o "$work/editor_main.o"
-$CC $flags tests/test_editor_full.c tests/host_gint.c src/input.c src/navigation.c src/navigation_input.c src/expr.c src/layout.c src/editor_meta.c src/plot.c src/plot2d.c src/ray.c src/trigfast.c src/voxel.c src/preview3d.c src/fractal.c src/scroll.c src/storage.c "$work/editor_main.o" -lm -o "$work/editor_full"
-$CC $flags tests/test_normalize.c tests/host_gint.c src/input.c src/navigation.c src/navigation_input.c src/expr.c src/layout.c src/editor_meta.c src/plot.c src/plot2d.c src/ray.c src/trigfast.c src/voxel.c src/preview3d.c src/fractal.c src/scroll.c src/storage.c "$work/editor_main.o" -lm -o "$work/normalize"
-$CC $flags tests/test_editor_fuzz.c tests/host_gint.c src/input.c src/navigation.c src/navigation_input.c src/expr.c src/layout.c src/editor_meta.c src/plot.c src/plot2d.c src/ray.c src/trigfast.c src/voxel.c src/preview3d.c src/fractal.c src/scroll.c src/storage.c "$work/editor_main.o" -lm -o "$work/editor_fuzz"
-$CC $flags tests/test_long_editor.c tests/host_gint.c src/input.c src/navigation.c src/navigation_input.c src/expr.c src/layout.c src/editor_meta.c src/plot.c src/plot2d.c src/ray.c src/trigfast.c src/voxel.c src/preview3d.c src/fractal.c src/scroll.c src/storage.c "$work/editor_main.o" -lm -o "$work/long_editor"
-# Inject failure into either session when OPTN opens a nested editor.
-$CC $flags -Dmain=graphlab_main -DGL_EDITOR_TEST -c src/main.c -o "$work/memory_main.o"
-$CC $flags tests/test_editor_memory.c tests/host_gint.c src/input.c src/navigation.c src/navigation_input.c src/expr.c src/layout.c src/editor_meta.c src/plot.c src/plot2d.c src/ray.c src/trigfast.c src/voxel.c src/preview3d.c src/fractal.c src/scroll.c src/storage.c "$work/memory_main.o" -Wl,--wrap=malloc,--wrap=free -lm -o "$work/editor_memory"
-$CC $flags tests/test_ui.c tests/host_gint.c src/input.c src/navigation.c src/navigation_input.c src/expr.c src/layout.c src/editor_meta.c src/plot.c src/plot2d.c src/ray.c src/trigfast.c src/voxel.c src/preview3d.c src/fractal.c src/scroll.c src/storage.c "$work/ui_main.o" -lm -o "$work/ui"
-$CC $flags tests/test_ui_pixels.c tests/host_gint.c src/input.c src/navigation.c src/navigation_input.c src/expr.c src/layout.c src/editor_meta.c src/plot.c src/plot2d.c src/ray.c src/trigfast.c src/voxel.c src/preview3d.c src/fractal.c src/scroll.c src/storage.c "$work/ui_main.o" -lm -o "$work/ui_pixels"
-$CC $flags tests/test_ui_pan.c tests/host_gint.c src/input.c src/navigation.c src/navigation_input.c src/expr.c src/layout.c src/editor_meta.c src/plot.c src/plot2d.c src/ray.c src/trigfast.c src/voxel.c src/preview3d.c src/fractal.c src/scroll.c src/storage.c "$work/ui_main.o" -lm -o "$work/ui_pan"
-$CC $flags tests/test_low_memory.c tests/host_gint.c src/input.c src/navigation.c src/navigation_input.c src/expr.c src/layout.c src/editor_meta.c src/plot.c src/plot2d.c src/ray.c src/trigfast.c src/voxel.c src/preview3d.c src/fractal.c src/scroll.c src/storage.c "$work/ui_main.o" -Wl,--wrap=malloc -Wl,--wrap=calloc -lm -o "$work/low_memory"
-for name in expr fuzz layout editor_navigation editor_meta editor_full editor_fuzz long_editor editor_memory normalize fuzz_layout plot axes3 plot2d voxel ray ray_optimization fractal scroll fractal_pan preview3d math108 quality navigation storage storage_failures ui ui_pixels ui_pan low_memory; do "$work/$name"; done
+exec sh "$(dirname "$0")/run_host_112.sh" "$@"

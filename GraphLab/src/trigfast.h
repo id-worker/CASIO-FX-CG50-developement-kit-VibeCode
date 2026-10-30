@@ -7,6 +7,7 @@
 typedef struct {
     float constant,sine[3],cosine[3],guard;
     int valid;
+    unsigned xyz_mode; /* optional prevalidated one-term-per-axis pattern */
 } TrigFast;
 int trigfast_prepare(TrigFast *plan,Program const *program,EvalVars const *base,float bound);
 int trigfast_value(TrigFast const *plan,float x,float y,float z,float target,float *value);

@@ -1,27 +1,13 @@
-# GraphLab 1.09 для Casio fx-CG50
+# GraphLab 1.20 for Casio fx-CG50
 
-Экспериментальный аддин для 2D/3D-графиков, неявных уравнений,
-неравенств и фракталов. Интерфейс — английский; [полное руководство — на
-русском](README_RU.md).
+GraphLab provides 2D/3D equations, inequalities, a structured formula editor, sums/products, an XY intersection map and custom fractals. The calculator interface is in English; the detailed guides are in Russian.
 
-1.09 добавляет длинный ввод выражений до 767 ASCII-символов (отдельные лимиты
-сложности остаются) и преимущественно чёрно-белый интерфейс. В 3D есть RAY с
-поисковой сеткой Q и приближённый предпросмотр из сохранённых точек без
-повторного полного построения. Цвета графиков и фракталов сохранены.
+- **Ray is now the only 3D renderer.** The former Fast Ray keeps its polygon-free ray-casting approach; the separate VOXEL engine and renderer selector have been removed.
+- 3D inequalities are also handled by Ray as approximate clipped volumes. The finite numerical search can miss small components, tangencies or difficult domain boundaries.
+- Preview and initial Ray spacing remain independently adjustable from 1 to 32 pixels; Ray Q is 4–48. After movement stops, the view refines automatically to one pixel. The 2→1 pass can show completed rows and progress; this does not guarantee faster rendering on the calculator.
+- 1.20 uses the same `GLAB8_A/B.DAT` journal as 1.18/1.19. Old renderer-selection bytes are retained for compatibility but ignored by 1.20. Back up `GraphLab.g3a`, `GLAB*.DAT` and `GLQ8*.DAT` before updating or reverting.
+- **1.20 has not been tested on physical fx-CG50 hardware.** Host and SuperH/QEMU tests do not establish physical timing, available memory, LCD or keyboard behavior.
 
-**Проверка:** host и искусственные SuperH/QEMU-тесты прошли. Полноценная
-проверка этой конкретной сборки на физическом калькуляторе не подтверждена;
-реальная скорость, память и отсутствие артефактов не гарантируются.
-Перед обновлением скопируй прежний `.g3a`, `GLAB*.DAT` и `GLQ8*.DAT` на ПК.
-Версия 1.09 импортирует старое состояние и сохраняет отдельно в
-`GLAB4_A.DAT` / `GLAB4_B.DAT`; старые версии его не читают.
+[Русская инструкция](README_RU.md) · [Быстрая проверка](БЫСТРАЯ_ПРОВЕРКА_RU.md) · [Настройки](НАСТРОЙКИ_RU.md) · [Проверки](ПРОВЕРКИ_1.20_RU.md)
 
-- Готовый [GraphLab.g3a](GraphLab.g3a) с новой иконкой, SHA-256:
-  `5face3051cf25ae459ee57022d268a83a5566414e8fb74622f4ad37c2f82623a`.
-  Исполняемая часть осталась той же, что в ранее опубликованном 1.09.
-- [Настройки](НАСТРОЙКИ_RU.md), [проверки 1.09](ПРОВЕРКИ_1.09_RU.md) и
-  [быстрая проверка редактора](БЫСТРАЯ_ПРОВЕРКА_RU.md).
-- Сборка: fxSDK/gint, в этой папке `fxsdk build-cg`.
-
-Оригинальный код — [MIT](LICENSE); сторонние условия — в
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) и `third_party/`.
+Build with `fxsdk build-cg` and compatible fxSDK/gint 2.11. Third-party notices and license texts are in `THIRD_PARTY_NOTICES.md` and `third_party/`.

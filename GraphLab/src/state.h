@@ -23,10 +23,20 @@ typedef struct {
     uint8_t reserved_v2[3];
     uint8_t curve_width; /* 1..5 pixels */
     uint8_t reserved_v3[3]; /* transient checked Q; authenticated by 1.08 sidecar */
-    uint8_t render3_mode; /* 0 voxels, 1 rays */
-    uint8_t voxel_div; /* grid cells/side, 6..64 */
+    /* Former mode/grid bytes retained only for GLAB8 and older journal ABI.
+       They do not select an engine in 1.20. Old add-ins can still read them. */
+    uint8_t legacy_render_mode;
+    uint8_t legacy_grid_div;
     uint8_t accuracy2; /* 0,1,2,3 => 0.25,0.5,1,2 screen pixels */
     uint8_t follow_eye; /* optionally move the search cube with translation */
+    /* v6: settings for the independent intersection and point-preview modes. */
+    float map_zmin,map_zmax;
+    uint8_t map_xy_quality,map_z_quality,cursor_quality,preview_quality;
+    /* v7 journal: independent starting step and Q for the Ray renderer. */
+    uint8_t fast_ray_step,fast_ray_q;
+    float map_extend_down,map_extend_up; /* optional world units beyond +/- clip */
+    /* v8 journal: direct 3D preview screen-pixel spacing, independent of the starting Ray step. */
+    uint8_t preview_ray_step; /* 1..32 */
 } GraphState;
 void state_defaults(GraphState *s);
 void state_default_eye(GraphState *s);

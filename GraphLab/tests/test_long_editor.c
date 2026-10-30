@@ -85,6 +85,6 @@ int main(void)
     assert(storage_save(&state)==0 && storage_load(&out)==1);
     assert(!strcmp(out.curve[0].formula,formula)&&!strcmp(out.recurrence[1],typed));
     assert(state_ray_quality(&out)==17);
-    char file[256];snprintf(file,sizeof file,"%s/GLAB4_A.DAT",dir);unlink(file);assert(rmdir(dir)==0);
+    char file[256];snprintf(file,sizeof file,"%s/GLAB8_A.DAT",dir);unlink(file);assert(rmdir(dir)==0);
     puts("Long editor: >600 keys, 767-byte boundary, parsed/raw caret following, >128 VM instructions and v5 persistence passed.");
 }

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Verify the five local G3As without calculator hardware or external packages.
 
-Checks exact current checksums, names, BMP pixels and embedded RGB565 icons.
+Checks the pinned v1.02 checksums, names, BMP pixels and embedded RGB565 icons.
+GraphLab 1.20 is verified separately from the unchanged v1.02 GraphLab 1.09.
 Four icon-only updates preserve executable data against recorded baseline
 hashes. PyCEdit 1.15 changes code and, as requested, the menu/filename/ID;
 the new fields and unchanged icon blocks are checked explicitly. This does
@@ -49,7 +50,10 @@ def validate_bmp_greyscale(path):
 for name, info in manifest.items():
     path = root/'releases'/info['filename']
     data = path.read_bytes()
-    assert (root/name/info['filename']).read_bytes() == data, name
+    # releases/ is the immutable v1.02 baseline. GraphLab has a newer
+    # separate release in its project directory; other projects stay pinned.
+    if name != 'GraphLab':
+        assert (root/name/info['filename']).read_bytes() == data, name
     assert len(data) == info['length'] and sha(data)==info['new_file_sha256'], name
     assert data[:14] == bytes.fromhex('aaacbdaf90889a8dd3fffefffeff'), name
     assert struct.unpack_from('>I',data,0x5c)[0] == len(data), name
@@ -93,6 +97,22 @@ for name, info in manifest.items():
     assert icons[0]!=icons[1], name
     code_status = 'new payload and PyCEdit names verified; 1.14 icons unchanged' if info['code_update'] else 'payload and metadata preserved'
     print(f"{name}: {info['version']}, {info['internal_id']}, {code_status}; two grey icons + checksums OK")
+
+# Check the separate, later GraphLab release without changing the v1.02 baseline.
+current = (root/'GraphLab/GraphLab.g3a').read_bytes()
+line = (root/'GraphLab/SHA256SUMS.txt').read_text(encoding='utf-8').splitlines()[0]
+assert line == sha(current) + '  GraphLab.g3a'
+assert current[:14] == bytes.fromhex('aaacbdaf90889a8dd3fffefffeff')
+assert struct.unpack_from('>I',current,0x5c)[0] == len(current)
+assert current[0x60:0x6b].split(b'\0')[0] == b'@GRAPHLAB'
+assert current[0x130:0x13c].split(b'\0')[0] == b'01.20.0000'
+c16=sum(struct.unpack_from('>8H',current,0x7100))&0xffff
+assert struct.unpack_from('>H',current,0x16)[0] == (c16^0xffff)
+c32=(sum(current[:0x20])+sum(current[0x24:-4]))&0xffffffff
+assert struct.unpack_from('>I',current,0x20)[0] == c32 == struct.unpack_from('>I',current,len(current)-4)[0]
+for state,start,end in [('unselected',0x1000,0x3e00),('selected',0x4000,0x6e00)]:
+    assert current[start:end] == validate_bmp_greyscale(root/'Icons'/'GraphLab'/(state+'.bmp'))
+print('GraphLab 1.20: separate current G3A, unchanged grey icons, version and checksums OK')
 
 assert sha((root/'Translator/TDIC.DAT').read_bytes()) == 'e7f6ab4a090c4f4998cbc5641a7cb06b44c5ef38a5c4c1c9d33f2e303a98cef2'
 print('Translator dictionary is unchanged. No Casio hardware was tested.')

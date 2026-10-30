@@ -63,11 +63,12 @@ int main(void) {
     assert(!strcmp(st.curve[0].formula,"summ(1,5,k,x^(k)/(k!))"));
     assert(host_text_seen("SUM: LOWER") && host_text_seen("SUM: UPPER") &&
            host_text_seen("SUM: INDEX") && host_text_seen("SUM: EXPRESSION"));
-    /* New template starts in the visibly selected term; DEL there must not
-       eat the invisible comma. Both bounds and the index remain editable. */
+    /* A new template starts in the term. Both bounds and the index remain
+       editable. DEL on an empty term now removes the template (covered by
+       test_editor_delete119); it must not eat an invisible comma. */
     key_event_t product_template[]={
         K(F1),K(DEL),S(F5),S(F5),S(F5),S(F5),S(F5),S(F5),S(F5),K(F4),
-        K(DEL),K(UP),K(DEL),K(3),K(DOWN),K(DEL),K(2),S(LEFT),
+        K(UP),K(DEL),K(3),K(DOWN),K(DEL),K(2),S(LEFT),
         K(DEL),A(COMMA),S(RIGHT),A(COMMA),K(RIGHT),K(DEL),A(COMMA),K(EXE),K(F5),K(EXIT),K(F6)
     };
     run(product_template,N(product_template));st=load();
@@ -129,8 +130,8 @@ int main(void) {
     key_event_t second_fractal[]={K(F3),K(RIGHT),K(EXE),S(DEL),K(F3),K(SQUARE),K(SUB),S(F5),K(F3),K(EXE),K(F5),K(EXIT),K(F6)};
     run(second_fractal,N(second_fractal));st=load();
     assert(!strcmp(st.recurrence[0],"z^(3)+c") && !strcmp(st.recurrence[1],"z^2-c") && st.fractal_slot==1);
-    /* Preserve and exercise the original Q ray controls as well as voxels. */
-    st=load();st.render3_mode=1;assert(storage_save(&st)==0);
+    /* Exercise Ray controls and preserve the legacy bytes on save. */
+    st=load();st.legacy_render_mode=2;assert(storage_save(&st)==0);
     /* Exact 3D observer, plot, layer change, separate MOVE and TURN, no
        recalculation while setting a new view, then explicit PLOT and probe. */
     key_event_t surface[]={
@@ -140,18 +141,17 @@ int main(void) {
         K(EXIT),K(F5),K(EXIT),K(F6)
     };
     run(surface,N(surface));st=load();
-    assert(st.detail3==2 && st.eye_x!=3 && st.eye_y!=4 && st.eye_z>5);
-    assert(host_calculation_count()==2 && host_text_seen("3D VALUES") && host_text_seen("zero on surface"));
-    assert(host_text_seen("Q20") && host_text_seen("Q32") && host_text_seen("SETTINGS"));
-    /* After a completed image, movement draws only cached visible points;
-       no formula calculation is started until PLOT is pressed again. */
-    GraphState preview_state;state_defaults(&preview_state);preview_state.render3_mode=1;
+    assert(st.fast_ray_q==12 && st.eye_x!=3 && st.eye_y!=4 && st.eye_z>5);
+    assert(host_calculation_count()==17 && host_text_seen("3D VALUES") && host_text_seen("zero on surface"));
+    assert(host_text_seen("R8/1") && host_text_seen("R12/1") && host_text_seen("SETTINGS"));
+    /* Movement re-renders the same scene at the preview pixel spacing. */
+    GraphState preview_state;state_defaults(&preview_state);preview_state.legacy_render_mode=2;
     strcpy(preview_state.surface[0].formula,"x^2+y^2+z^2=1");assert(storage_save(&preview_state)==0);
     key_event_t preview_ray[]={K(F2),K(F6),K(F6),K(RIGHT),K(UP),K(1),K(F6),K(EXIT),K(EXIT),K(F6)};
-    run(preview_ray,N(preview_ray));assert(host_calculation_count()==2&&host_text_seen("PREVIEW"));
+    run(preview_ray,N(preview_ray));assert(host_calculation_count()==14&&host_text_seen("PREVIEW"));
     strcpy(preview_state.surface[0].formula,"x^2+y^2+z^2<=1");assert(storage_save(&preview_state)==0);
-    key_event_t preview_voxel[]={K(F2),K(F6),K(F6),K(RIGHT),K(F6),K(EXIT),K(EXIT),K(F6)};
-    run(preview_voxel,N(preview_voxel));assert(host_calculation_count()==2&&host_text_seen("PREVIEW")&&host_text_seen("V20*"));
+    key_event_t preview_volume[]={K(F2),K(F6),K(F6),K(RIGHT),K(F6),K(EXIT),K(EXIT),K(F6)};
+    run(preview_volume,N(preview_volume));assert(host_calculation_count()==12&&host_text_seen("PREVIEW")&&host_text_seen("R8/1"));
     /* 3D arrows always turn; 1/0 move vertically without a mode switch.
        Held SHIFT accelerates both distinct presses without affecting turning. */
     GraphState fresh;state_defaults(&fresh);assert(storage_save(&fresh)==0);
@@ -170,7 +170,7 @@ int main(void) {
     run(slow_nav,N(slow_nav));st=load();
     assert(fabsf(st.camera_yaw-(fresh.camera_yaw-.065f))<1e-5f);
     assert(fabsf(st.eye_z-(fresh.eye_z+4.4f*.065f*fresh.volume_radius))<1e-4f);
-    assert(host_text_seen("SLOW") && host_calculation_count()==0);
+    assert(host_text_seen("SLOW") && host_calculation_count()==7);
     /* Setting exact eye coordinates does not rotate the user's camera. */
     state_defaults(&fresh);assert(storage_save(&fresh)==0);
     key_event_t eye_without_turn[]={K(F2),K(F6),K(VARS),K(EXE),S(DEL),K(3),K(EXE),K(F6),
@@ -223,30 +223,32 @@ int main(void) {
         K(F2),K(XOT),K(EXE),K(F5),K(F6),K(F6),K(VARS),K(F6),K(EXIT),K(EXIT),K(F6)};
     run(inequality_input,N(inequality_input));st=load();assert(!strcmp(st.curve[0].formula,"y<=x"));
     assert(host_calculation_count()==1 && (host_text_seen("TRUE")||host_text_seen("FALSE")));
-    /* Step snaps to realizable N; renderer and 2D tolerance stay independent. */
+    /* The 3D page has no renderer switch. Ray step, Q, and 2D
+       accuracy are independent and saved. */
     state_defaults(&fresh);assert(storage_save(&fresh)==0);
-    key_event_t new_settings[]={K(OPTN),K(UP),K(EXE),S(DEL),K(1),K(EXE),
-        K(UP),K(RIGHT),K(UP),K(UP),K(RIGHT),K(UP),K(RIGHT),K(F5),K(F6),K(F6)};
+    key_event_t new_settings[]={K(OPTN),K(UP),K(RIGHT),K(OPTN),
+        K(EXE),S(DEL),K(7),K(EXE),K(DOWN),K(RIGHT),K(F5),K(F6),K(F6)};
     run(new_settings,N(new_settings));st=load();
-    assert(st.follow_eye==0 && st.voxel_div==7 && st.render3_mode==1 && st.accuracy2==2);
-    assert(host_text_seen("Voxel step (world)") && host_text_seen("2D accuracy (px)"));
+    assert(st.follow_eye==0 && st.fast_ray_step==7 && st.fast_ray_q==9 && st.accuracy2==2);
+    assert(host_text_seen("Ray start step (px)") && host_text_seen("2D accuracy (px)"));
+    assert(!host_text_seen("3D renderer") && !host_text_seen("VOXEL"));
     /* Manual Q, invalid entry, saved custom value and stale-preview invalidation. */
-    state_defaults(&fresh);fresh.render3_mode=1;strcpy(fresh.surface[0].formula,"x^2+y^2+z^2=1");
+    state_defaults(&fresh);fresh.legacy_render_mode=2;strcpy(fresh.surface[0].formula,"x^2+y^2+z^2=1");
     assert(storage_save(&fresh)==0);
     key_event_t quality[]={
-        K(OPTN),K(UP),K(UP),K(UP),K(EXE),S(DEL),K(1),K(7),K(EXE),K(RIGHT),
+        K(OPTN),K(OPTN),K(DOWN),K(EXE),S(DEL),K(1),K(7),K(EXE),K(RIGHT),
         K(EXE),S(DEL),K(4),K(9),K(EXE),K(F5),K(F6),
-        K(F2),K(F6),K(F6),K(RIGHT),K(OPTN),K(UP),K(UP),K(UP),
+        K(F2),K(F6),K(F6),K(RIGHT),K(OPTN),K(OPTN),K(DOWN),
         K(EXE),S(DEL),K(1),K(3),K(EXE),K(F6),K(F6),K(EXIT),K(F5),K(EXIT),K(F6)
     };
     run(quality,N(quality));st=load();
-    assert(state_ray_quality(&st)==13&&host_calculation_count()==2);
-    assert(host_text_seen("Ray grid divisions")&&host_text_seen("Q18")&&host_text_seen("Q13")&&
+    assert(st.fast_ray_q==13&&host_calculation_count()==13);
+    assert(host_text_seen("Ray Q")&&host_text_seen("R18/1")&&host_text_seen("R13/1")&&
            host_text_seen("PREVIEW")&&host_text_seen("Ray grid requires an integer Q from 4 to 48."));
-    assert(state_set_ray_quality(&st,48)&&storage_save(&st)==0);
+    st.fast_ray_q=48;assert(storage_save(&st)==0);
     key_event_t quality_cycle[]={K(F2),K(F6),K(F4),K(F4),K(EXIT),K(F5),K(EXIT),K(F6)};
     run(quality_cycle,N(quality_cycle));st=load();
-    assert(state_ray_quality(&st)==12&&host_text_seen("Q48")&&host_text_seen("Q4")&&host_text_seen("Q12"));
+    assert(st.fast_ray_q==12&&host_text_seen("R48/1")&&host_text_seen("R4/1")&&host_text_seen("R12/1"));
     /* An old moving/offset 1.03 domain is normalized once on load. Moving the
        camera afterwards cannot translate it; +/- do not change field of view. */
     state_defaults(&fresh);fresh.follow_eye=1;fresh.volume_x=8;fresh.volume_y=-4;fresh.volume_z=2;
@@ -257,14 +259,13 @@ int main(void) {
     assert(host_text_seen("3D cube reset to origin"));
     state_defaults(&fresh);assert(storage_save(&fresh)==0);
     key_event_t ignored_zoom[]={K(F2),K(F6),K(F6),K(ADD),K(SUB),K(EXIT),K(F5),K(EXIT),K(F6)};
-    run(ignored_zoom,N(ignored_zoom));st=load();assert(st.camera_zoom==1 && host_calculation_count()==1);
-    /* RAY remains available for equations, but a 3D inequality is displayed
-       as a bounded voxel volume and marked with V* instead of a false Q. */
-    state_defaults(&fresh);fresh.render3_mode=1;strcpy(fresh.surface[0].formula,"x^2+y^2+z^2<=4");
+    run(ignored_zoom,N(ignored_zoom));st=load();assert(st.camera_zoom==1 && host_calculation_count()==6);
+    /* Inequalities use the same bounded Ray renderer and Q indicator. */
+    state_defaults(&fresh);fresh.legacy_render_mode=2;strcpy(fresh.surface[0].formula,"x^2+y^2+z^2<=4");
     assert(storage_save(&fresh)==0);
     key_event_t volume[]={K(F2),K(F6),K(F6),K(VARS),K(F6),K(EXIT),K(EXIT),K(F6)};
-    run(volume,N(volume));assert(host_calculation_count()==1 && host_text_seen("V20*") && host_text_seen("TRUE"));
-    char path[256];snprintf(path,sizeof path,"%s/GLAB4_A.DAT",dir);unlink(path);snprintf(path,sizeof path,"%s/GLAB4_B.DAT",dir);unlink(path);
+    run(volume,N(volume));assert(host_calculation_count()==6 && host_text_seen("R8/1") && host_text_seen("TRUE"));
+    char path[256];snprintf(path,sizeof path,"%s/GLAB8_A.DAT",dir);unlink(path);snprintf(path,sizeof path,"%s/GLAB8_B.DAT",dir);unlink(path);
     snprintf(path,sizeof path,"%s/GLQ8_A.DAT",dir);unlink(path);snprintf(path,sizeof path,"%s/GLQ8_B.DAT",dir);unlink(path);assert(rmdir(dir)==0);
     puts("Scripted UI: new/edit formula, ALPHA, sums, view selection, 2D/3D/fractal silent calculation/caching, move/turn, coordinates and cancellation passed.");
 }

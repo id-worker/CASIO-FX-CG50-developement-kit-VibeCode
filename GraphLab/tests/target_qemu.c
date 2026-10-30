@@ -3,7 +3,6 @@
 #include "../src/layout.h"
 #include "../src/plot.h"
 #include "../src/ray.h"
-#include "../src/voxel.h"
 #include "../src/plot2d.h"
 #include "../src/fractal.h"
 #include "../src/navigation.h"
@@ -106,16 +105,16 @@ int main(void){
     plane=(PlaneView){-2,2,-2,2,64,64,0};segments=0;
     if(plot_explicit_y(&rhs,rel,&v,&plane,386,181,segment,NULL,NULL,NULL,NULL,NULL,&stats)!=1 || segments<300)return 52;
     if(!compile("x^2+y^2+z^2=4"))return 53;
-    vol=(Volume){0,0,0,3,12,0};VoxelStats vox;rs=(RaySurface){&pr,0};
+    vol=(Volume){0,0,0,3,12,0};rs=(RaySurface){&pr,0};
     for(int i=0;i<DWIDTH*DHEIGHT;i++)gint_vram[i]=C_WHITE;
-    int vrc=voxel3d_render(&rs,1,&v,&vol,&cam,NULL,NULL,&vox);
+    int vrc=ray3d_render(&rs,1,&v,&vol,&cam,NULL,NULL,&rstats);
     if(vrc!=1)return 60;
-    if(vox.occupied<100)return 61;
-    if(vox.pixels<500)return 62;
+    if(rstats.occupied<100)return 61;
+    if(rstats.hits<500)return 62;
     if(gint_vram[center]==C_WHITE)return 63;
     if(guarded_vram[0]!=0x5aa5||guarded_vram[DWIDTH*DHEIGHT+1]!=0x5aa5)return 55;
     if(!compile("x^2+y^2+z^2<=4"))return 56;
-    if(voxel3d_render(&rs,1,&v,&vol,&cam,NULL,NULL,&vox)!=1||vox.occupied<100||vox.occupied>=1728)return 57;
+    if(ray3d_render(&rs,1,&v,&vol,&cam,NULL,NULL,&rstats)!=1||rstats.occupied<100||rstats.occupied>=1728)return 57;
     if(!expr_parse(&p,"summ(0,inf,n,)",1)||!layout_measure(&p))return 46;
     int cursor=6;if(layout_sum_field(&p,cursor,NULL)!=0 || layout_sum_step(&p,cursor,-1)!=10 || layout_delete_start(&p,10)!=7)return 47;
     if(layout_cursor_step(&p,6,1)!=13 || layout_delete_start(&p,13)!=13)return 68;
@@ -135,13 +134,12 @@ int main(void){
     float ox,oy;if(!render3_project_world(&nearcam,0,0,0,&ox,&oy))return 72;
     float dx=axes.x1-axes.x0,dy=axes.y1-axes.y0;
     if(fabsf(dx*(oy-axes.y0)-dy*(ox-axes.x0))>2*sqrtf(dx*dx+dy*dy))return 73;
-    /* Exercise precise face clipping with real SH soft-double arithmetic:
-       a voxel face is only ~0.00006 world units away in an R=10000 cube. */
+    /* A large clip cube with a plane close to the observer. */
     if(!compile("y=0"))return 74;
     vol=(Volume){0,0,0,10000,20,0};
     cam=(Camera){.yaw=.2f,.pitch=.1f,.zoom=1,.radius=10000,.eye_y=1000.00006f,.perspective=1};
     for(int i=0;i<DWIDTH*DHEIGHT;i++)gint_vram[i]=C_WHITE;
-    if(voxel3d_render(&rs,1,&v,&vol,&cam,NULL,NULL,&vox)!=1 || gint_vram[center]==C_WHITE)return 75;
+    if(ray3d_render(&rs,1,&v,&vol,&cam,NULL,NULL,&rstats)!=1 || gint_vram[center]==C_WHITE)return 75;
     for(int py=PLOT_Y0;py<PLOT_Y1;py++)for(int px=PLOT_X0;px<PLOT_X1;px++)
         if(gint_vram[py*DWIDTH+px]==C_WHITE)return 76;
     if(guarded_vram[0]!=0x5aa5||guarded_vram[DWIDTH*DHEIGHT+1]!=0x5aa5)return 77;

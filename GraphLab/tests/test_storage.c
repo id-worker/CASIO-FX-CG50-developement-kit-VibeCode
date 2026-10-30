@@ -112,11 +112,11 @@ int main(void) {
     state_defaults(&st);strcpy(st.recurrence[0],"z^5+c");st.curve_width=5;st.eye_y=23.5f;make_version3(old,&st);
     fd=open(old,O_RDONLY);assert(fd>=0);len=read(fd,original,sizeof original);assert(len>0);close(fd);
     assert(storage_load(&out)==1 && !strcmp(out.recurrence[0],"z^5+c") && out.curve_width==5 && out.eye_y==23.5f);
-    assert(out.render3_mode==0 && out.voxel_div==20 && out.accuracy2==1 && out.follow_eye==0);
-    out.render3_mode=1;out.voxel_div=64;out.accuracy2=3;out.follow_eye=1;assert(storage_save(&out)==0);
-    assert(storage_load(&migrated)==1 && migrated.render3_mode==1 && migrated.voxel_div==64 && migrated.accuracy2==3 && migrated.follow_eye==1);
+    assert(out.legacy_render_mode==0 && out.legacy_grid_div==20 && out.accuracy2==1 && out.follow_eye==0);
+    out.legacy_render_mode=1;out.legacy_grid_div=64;out.accuracy2=3;out.follow_eye=1;assert(storage_save(&out)==0);
+    assert(storage_load(&migrated)==1 && migrated.legacy_render_mode==1 && migrated.legacy_grid_div==64 && migrated.accuracy2==3 && migrated.follow_eye==1);
     fd=open(old,O_RDONLY);assert(fd>=0);assert(read(fd,after,sizeof after)==len);close(fd);assert(!memcmp(original,after,(size_t)len));
-    out.voxel_div=65;assert(!state_validate(&out));out.voxel_div=20;out.accuracy2=4;assert(!state_validate(&out));
+    out.legacy_grid_div=65;assert(!state_validate(&out));out.legacy_grid_div=20;out.accuracy2=4;assert(!state_validate(&out));
     unlink(a);unlink(b);unlink(old);rmdir(path);
     puts("Save journal, v0.90/v1.00/v1.01 migration, recovery, foreign-file protection and validation passed.");
 }

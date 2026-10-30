@@ -701,6 +701,64 @@ float expr_eval_real(Program const *p, EvalVars const *vars)
     if(!p || !vars)return NAN;
     EvalCtx ctx={EXPR_SUM_MAX_WORK,0};return eval_real_range(p,vars,0,p->size,&ctx);
 }
+
+/* Validate stack safety once per immutable program. Fast evaluation below
+   intentionally keeps the *same* operations and order as eval_real_range;
+   anything not proven safe uses the original evaluator instead. */
+int expr_real_fast_usable(Program const *p)
+{
+    if(!p||p->size==0||p->size>EXPR_CODE)return 0;
+    int sp=0;
+    for(int j=0;j<p->size;j++){
+        Instr const *in=&p->code[j];
+        switch(in->op){
+            case I_NUM: if(sp>=EXPR_STACK)return 0;sp++;break;
+            case I_VAR: if(sp>=EXPR_STACK||in->aux>=V_COUNT)return 0;sp++;break;
+            case I_NEG:case I_SQUARE:case I_CUBE:
+                if(sp<1)return 0;
+                break;
+            case I_FUNC:
+                if(in->aux>=F_COUNT||sp<1)return 0;
+                if(is_binary_func(in->aux)){if(sp<2)return 0;sp--;}
+                break;
+            case I_ADD:case I_SUB:case I_MUL:case I_DIV:case I_POW:
+                if(sp<2)return 0;
+                sp--;break;
+            default:return 0;
+        }
+    }
+    return sp==1;
+}
+float expr_eval_real_fast(Program const *p,EvalVars const *vars)
+{
+    /* Precondition: expr_real_fast_usable(p) returned true and p was not
+       subsequently mutated. There are no SUM/PROD work-limit changes here. */
+    float st[EXPR_STACK];int sp=0;
+    for(int j=0;j<p->size;j++){
+        Instr const *in=&p->code[j];float a,b;
+        switch(in->op){
+            case I_NUM:st[sp++]=in->number;break;
+            case I_VAR:st[sp++]=vars->v[in->aux];break;
+            case I_NEG:st[sp-1]=-st[sp-1];break;
+            case I_SQUARE:st[sp-1]*=st[sp-1];break;
+            case I_CUBE:a=st[sp-1];st[sp-1]=a*a*a;break;
+            case I_FUNC:
+                b=0;if(is_binary_func(in->aux))b=st[--sp];
+                a=st[sp-1];st[sp-1]=eval_func_real(in->aux,a,b);break;
+            default:
+                b=st[--sp];a=st[sp-1];
+                switch(in->op){
+                    case I_ADD:st[sp-1]=a+b;break;
+                    case I_SUB:st[sp-1]=a-b;break;
+                    case I_MUL:st[sp-1]=a*b;break;
+                    case I_DIV:st[sp-1]=b==0?NAN:a/b;break;
+                    case I_POW:st[sp-1]=powf(a,b);break;
+                    default:return NAN; /* unreachable after verification */
+                }
+        }
+    }
+    return st[0];
+}
 static Complex cx(float re,float im) { Complex z={re,im};return z; }
 static Complex cmul(Complex a,Complex b) { return cx(a.re*b.re-a.im*b.im,a.re*b.im+a.im*b.re); }
 static Complex cdiv_(Complex a,Complex b)

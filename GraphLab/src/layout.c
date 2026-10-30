@@ -379,7 +379,11 @@ static int hidden_cursor(Parsed const *p,int at)
                 if(a->kind==N_GROUP && a->right>=0 && at==a->right+1 && at==n->op_pos)return 1;
             }
         }
-        if(n->kind==N_SUM || n->kind==N_PROD || (n->kind==N_FUNC && n->aux==F_SQRT && n->right<0)) {
+        /* Function names are single editor tokens, just like SUM/PROD and
+           the radical. Stepping into the spelling of sin/min/etc. made DEL
+           produce broken partial names ("si", "sq", ...), especially when
+           a fraction shares the following source boundary. */
+        if(n->kind==N_SUM || n->kind==N_PROD || n->kind==N_FUNC) {
             int open=n->op_pos>=0?n->op_pos:-n->op_pos-2;
             if(at>n->start && at<=open)return 1;
         }

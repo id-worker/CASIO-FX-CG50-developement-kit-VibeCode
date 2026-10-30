@@ -36,6 +36,7 @@ void drect_border(int x0,int y0,int x1,int y1,int c,int w,int b) {drect(x0,y0,x1
 void dclear(color_t c){for(int i=0;i<DWIDTH*DHEIGHT;i++)vram[i]=c;}
 static unsigned frames;
 static int in_calculation,calculation_count,polls_outside_calculation,partial_updates;
+static int partial_colored,partial_min,partial_max;
 static unsigned snapshot_frame;
 static size_t snapshot_key=(size_t)-1;
 static size_t snapshot_getkey=(size_t)-1;
@@ -52,7 +53,13 @@ static void snapshot(void){
 }
 void dupdate(void){
     frames++;
-    if(in_calculation)partial_updates++;
+    if(in_calculation){
+        partial_updates++;
+        int n=0;for(int y=19;y<=199;y++)for(int x=5;x<=390;x++){
+            uint16_t c=vram[y*DWIDTH+x];if(c!=C_WHITE&&c!=C_BLACK)n++;
+        }
+        if(n){partial_colored++;if(!partial_min||n<partial_min)partial_min=n;if(n>partial_max)partial_max=n;}
+    }
     if((snapshot_frame && frames==snapshot_frame) || script_pos==snapshot_key){
         snapshot_frame=0;snapshot_key=(size_t)-1;snapshot();
     }
@@ -78,12 +85,14 @@ static size_t script_count;
 static key_event_t async_key;
 static int async_after=-1,async_calculation=-1;
 static int menus_opened;
+static unsigned clock_tick,clock_per_poll;
 void host_keys(key_event_t const *keys,size_t count){
-    script=keys;script_count=count;script_pos=0;frames=0;in_calculation=calculation_count=polls_outside_calculation=partial_updates=0;async_after=-1;async_calculation=-1;snapshot_frame=0;snapshot_key=(size_t)-1;snapshot_getkey=(size_t)-1;menus_opened=0;text_log_used=0;text_log[0]=0;
+    script=keys;script_count=count;script_pos=0;frames=0;in_calculation=calculation_count=polls_outside_calculation=partial_updates=0;partial_colored=partial_min=partial_max=0;async_after=-1;async_calculation=-1;snapshot_frame=0;snapshot_key=(size_t)-1;snapshot_getkey=(size_t)-1;menus_opened=0;text_log_used=0;text_log[0]=0;clock_tick=clock_per_poll=0;
     for(int i=0;i<64;i++)vram_storage[i]=vram_storage[DWIDTH*DHEIGHT+64+i]=0x5aa5;
 }
 void host_async_key(key_event_t key,int after_polls){async_key=key;async_after=after_polls;async_calculation=-1;}
 void host_async_on_calculation(key_event_t key,int calculation,int after_polls){async_key=key;async_after=after_polls;async_calculation=calculation;}
+void host_tick_per_poll(unsigned ticks){clock_per_poll=ticks;}
 size_t host_keys_used(void){return script_pos;}
 unsigned host_frames(void){return frames;}
 void host_snapshot_on_frame(unsigned frame,const char *path){snapshot_frame=frame;snprintf(snapshot_path,sizeof snapshot_path,"%s",path);}
@@ -97,6 +106,9 @@ void host_calculation_begin(void){if(in_calculation)abort();in_calculation=1;cal
 void host_calculation_end(void){if(!in_calculation)abort();in_calculation=0;}
 int host_calculation_count(void){return calculation_count;}
 int host_partial_updates(void){return partial_updates;}
+int host_partial_colored_frames(void){return partial_colored;}
+int host_partial_min_colored(void){return partial_min;}
+int host_partial_max_colored(void){return partial_max;}
 int host_polls_outside_calculation(void){return polls_outside_calculation;}
 key_event_t getkey(void){
     if(script_pos==snapshot_getkey){snapshot_getkey=(size_t)-1;snapshot();}
@@ -110,8 +122,9 @@ int keydown(int key){
 }
 key_event_t pollevent(void){
     if(!in_calculation)polls_outside_calculation++;
-    if(async_after>=0 && (async_calculation<0||async_calculation==calculation_count) && async_after--==0){async_after=-1;return async_key;}
-    return (key_event_t){.type=KEYEV_NONE};
+    clock_tick+=clock_per_poll;
+    if(async_after>=0 && (async_calculation<0||async_calculation==calculation_count) && async_after--==0){async_after=-1;async_key.time=(uint16_t)clock_tick;return async_key;}
+    return (key_event_t){.type=KEYEV_NONE,.time=(uint16_t)clock_tick};
 }
 void gint_setrestart(int enable){(void)enable;}
 void gint_osmenu(void){menus_opened++;}

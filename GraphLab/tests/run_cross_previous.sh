@@ -1,5 +1,5 @@
 #!/bin/sh
-# Exchange actual journal files between independently compiled 1.09 and
+# Exchange actual journal files between independently compiled 1.10 and
 # a previous GraphLab version (1.08 by default; PREVIOUS_ROOT can select another).
 # This tests host files; it does not emulate the calculator file system.
 set -eu
@@ -9,11 +9,11 @@ newroot=$(pwd)
 # PREVIOUS_ROOT to test another complete compatible version instead.
 oldroot=${PREVIOUS_ROOT:-"$newroot/tests/fixtures/GraphLab_1.08"}
 test -f "$oldroot/src/storage.c" || { echo "Set PREVIOUS_ROOT to the extracted previous GraphLab source." >&2; exit 1; }
-work=$(mktemp -d "${TMPDIR:-/tmp}/gl109-cross-XXXXXX")
+work=$(mktemp -d "${TMPDIR:-/tmp}/gl110-cross-XXXXXX")
 trap 'rm -rf "$work"' EXIT HUP INT TERM
 CC=${CC:-cc}
 "$CC" -std=c11 -DGL_HOST -Wall -Wextra -Werror -I"$oldroot/src" tests/cross_storage.c "$oldroot/src/storage.c" -lm -o "$work/old"
-"$CC" -std=c11 -DGL_HOST -Wall -Wextra -Werror -I"$newroot/src" tests/cross_storage.c "$newroot/src/storage.c" -lm -o "$work/new"
+"$CC" -std=c11 -DGL_HOST -DGL_CURRENT_120 -Wall -Wextra -Werror -I"$newroot/src" tests/cross_storage.c "$newroot/src/storage.c" -lm -o "$work/new"
 mkdir "$work/data"
 "$work/old" "$work/data" write-old
 "$work/new" "$work/data" read-old

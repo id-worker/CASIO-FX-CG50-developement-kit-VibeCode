@@ -1,5 +1,4 @@
 #include "../src/ray.h"
-#include "../src/voxel.h"
 #include "host_gint.h"
 #include <assert.h>
 #include <stdio.h>
@@ -34,8 +33,10 @@ int main(void)
     dclear(C_WHITE);assert(preview3d_draw(&p,&c)==1&&colored()>1000);
     c.yaw=.3f;dclear(C_WHITE);assert(preview3d_draw(&p,&c)==1&&colored()>500);
     preview3d_free(&p);
-    c.yaw=0;VoxelStats vs;assert(preview3d_begin(&p,&v,&c));dclear(C_WHITE);
-    assert(voxel3d_render_ex(&s,1,&vars,&v,&c,&p,NULL,NULL,&vs)==1);
+    /* A volume is captured by the very same Ray renderer. */
+    c.yaw=0;compile("x^2+y^2+z^2<=1");
+    assert(preview3d_begin(&p,&v,&c));dclear(C_WHITE);
+    assert(ray3d_render_ex(&s,1,&vars,&v,&c,&opt,NULL,NULL,&rs)==1);
     assert(p.count>100&&p.count<=p.capacity);
     dclear(C_WHITE);assert(preview3d_draw(&p,&c)==1&&colored()>1000);
     c.pitch=.2f;dclear(C_WHITE);assert(preview3d_draw(&p,&c)==1&&colored()>500);
@@ -61,5 +62,5 @@ int main(void)
     dclear(C_WHITE);assert(ray3d_render_ex(&s,1,&vars,&v,&opposite,&opt,NULL,NULL,&rs)==1&&rs.grid_reused);
     assert(p.count>0&&p.aux_count==auxiliary&&host_vram_guards_ok());
     preview3d_free(&p);ray_grid_cache_clear(&grid);
-    puts("Point-cloud preview: RAY/VOXEL capture, added coverage, cache reuse, occlusion and VRAM guards passed.");
+    puts("Point-cloud preview: Ray equation/volume capture, added coverage, cache reuse, occlusion and VRAM guards passed.");
 }

@@ -2,12 +2,13 @@
 #define GL_RAY_H
 #include "plot.h"
 #include "preview3d.h"
+#include "refine.h"
 /* Direct implicit-surface ray casting: no generated triangles or polygons.
    The finite search grid is only an acceleration structure. */
 #define RAY_MAX_DIV 64
 #define RAY_MAX_SURFACES 2
 typedef struct { Program const *program; int slot; } RaySurface;
-typedef struct { int rays, hits, occupied, evaluations, canceled,grid_reused,height_fields,fast_evaluations; } RayStats;
+typedef struct { int rays, hits, occupied, evaluations, canceled,grid_reused,height_fields,fast_evaluations,reused_rays; } RayStats;
 /* Candidate bits depend on field, parameters and fixed clip cube, not camera.
    This optional cache is private to one graph view. Clear it when finished. */
 typedef struct {
@@ -18,6 +19,16 @@ typedef struct {
 typedef struct {
     Program const *height[RAY_MAX_SURFACES]; /* equivalent f(x,y), or NULL */
     RayGridCache *grid;Preview3D *preview;
+    /* 0/1 = original per-pixel RAY; 2..32 = filled sampled screen tiles. */
+    uint8_t screen_step;
+    /* Optional row-wise 2 -> 1 pass. Only valid with a completed step 2,
+       a layer and refine. Even/even positions are already complete and are
+       skipped outright; other old seed samples are still reused. */
+    uint8_t final_stream;
+    /* Optional incremental frame: a plot-sized layer and cached samples.
+       A completed seed is followed only by refine_next() stages; the caller
+       must reset both layer and cache when the scene or camera changes. */
+    uint16_t *layer;ScreenRefine *refine;
 } RayRenderOptions;
 void ray_grid_cache_clear(RayGridCache *cache);
 /* Writes a complete image to gint_vram, but never calls dupdate(). Returns

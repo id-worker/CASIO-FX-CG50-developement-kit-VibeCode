@@ -78,6 +78,10 @@ int expr_parse(Parsed *p, char const *src, int tolerant);
 int expr_parse_editor(Parsed *p,char const *src,const int16_t *mate,const int16_t *comma_owner);
 int expr_compile(Parsed const *p, Program *out, char *error, size_t error_size);
 float expr_eval_real(Program const *program, EvalVars const *vars);
+/* Optional real-only path for a validated immutable program. Unsupported
+   bytecode (including bounded sums/products) falls back to expr_eval_real(). */
+int expr_real_fast_usable(Program const *program);
+float expr_eval_real_fast(Program const *program, EvalVars const *vars);
 Complex expr_eval_complex(Program const *program, EvalVars const *vars);
 int expr_program_uses(Program const *program, VarId var);
 /* Conservative whitelist: true only for expressions composed from globally

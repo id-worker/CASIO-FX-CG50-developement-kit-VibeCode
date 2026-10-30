@@ -3,7 +3,6 @@
 #include "../src/expr.h"
 #include "../src/plot2d.h"
 #include "../src/ray.h"
-#include "../src/voxel.h"
 #include "../src/trigfast.h"
 #include "host_gint.h"
 #include <assert.h>
@@ -64,19 +63,6 @@ static void periods_2d(void)
     assert(plot_explicit_y(&rhs,rel,&vars,&v,81,81,segment,&sb,NULL,NULL,NULL,NULL,&b)==1);
     assert(b.evaluations<a.evaluations&&abs(sa.count-sb.count)<=2);
 }
-static void voxel_user(void)
-{
-    compile("sin(x)+sin(y)+sin(z)=0");Volume v={0,0,0,10,20,0};
-    Camera c={.yaw=.75f,.pitch=.55f,.zoom=1,.radius=10,.eye_x=11.4f,.eye_y=24.8f,.eye_z=19,.perspective=1};
-    RaySurface s={&p,0};VoxelStats a,b;static uint16_t image[DWIDTH*DHEIGHT];
-    host_keys(NULL,0);dclear(C_WHITE);assert(voxel3d_render(&s,1,&vars,&v,&c,NULL,NULL,&a)==1);
-    memcpy(image,gint_vram,sizeof image);assert(a.rejected==0&&a.occupied>=4800);
-    v.period_x=10;dclear(C_WHITE);assert(voxel3d_render(&s,1,&vars,&v,&c,NULL,NULL,&b)==1);
-    assert(a.evaluations==b.evaluations&&a.occupied==b.occupied&&memcmp(image,gint_vram,sizeof image)==0);
-    compile("1/x=0");v.period_x=0;v.div=21;dclear(C_WHITE);
-    assert(voxel3d_render(&s,1,&vars,&v,&c,NULL,NULL,&b)==1);
-    assert(b.occupied==0&&b.rejected>0&&host_vram_guards_ok());
-}
 int main(void)
 {
     float tau=6.2831853071795864769f;
@@ -86,6 +72,6 @@ int main(void)
     proof("sin(x*y)=0",tau,0);proof("1/sin(x)=0",tau,0);proof("y^2+z=1",10,1);
     continuous("sin(x)+sin(y)+sin(z)=0",1);continuous("x^2+y^2+z^2=1",1);
     continuous("1/x=0",0);continuous("tan(x)=0",0);continuous("sqrt(x)=0",0);continuous("floor(x)=0",0);
-    trig_test();periods_2d();voxel_user();
+    trig_test();periods_2d();
     puts("1.08: guarded trig, true/false X periods, both 2D paths, continuous crossings and poles passed.");
 }

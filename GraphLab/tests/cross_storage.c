@@ -1,4 +1,7 @@
 #include "storage.h"
+#ifdef GL_CURRENT_120
+#define voxel_div legacy_grid_div
+#endif
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

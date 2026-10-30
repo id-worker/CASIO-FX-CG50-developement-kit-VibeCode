@@ -4,6 +4,7 @@
 #ifndef GL_HOST
 #include <gint/timer.h>
 #endif
+#define NAVIGATION_IDLE_US 500000
 uint32_t navigation_key(int key)
 {
     switch(key){
@@ -31,27 +32,60 @@ uint32_t navigation_held(key_event_t event)
     return mask;
 #endif
 }
-/* Low-level events keep ALPHA's release visible: a tap toggles slow mode,
-   while a held chord only slows movement. A one-shot timer provides smooth
-   continuous movement without busy-waiting or rebuilding the graph. */
+/* ObjView-style fast loop: while a motion key is down, consume pending raw
+   events without adding a fixed delay after every completed frame. When no
+   motion key is down, sleep until an event rather than busy-waiting. */
 key_event_t navigation_wait(void)
 {
 #ifdef GL_HOST
     return getkey();
 #else
     int moving=navigation_held((key_event_t){0})!=0;
-    volatile int frame=0;
-    int timer=moving?timer_configure(TIMER_ANY,40000,GINT_CALL_SET_STOP(&frame)):-1;
-    if(timer>=0)timer_start(timer);
-    key_event_t ev;
     for(;;){
-        ev=waitevent(timer>=0?&frame:NULL);
-        /* The timed loop handles held keys itself. Without a timer, a gint
-           repeat still permits a limited, usable fallback. */
-        if(ev.type==KEYEV_HOLD && (timer>=0 || !moving || !navigation_key(ev.key)))continue;
-        break;
+        key_event_t ev=moving?pollevent():waitevent(NULL);
+        /* Motion repeats are driven by the frame loop, not by key repeat. */
+        if(ev.type==KEYEV_HOLD && navigation_key(ev.key))continue;
+        return ev;
     }
-    if(timer>=0 && !frame)timer_stop(timer);
+#endif
+}
+/* Start refinement after a short quiet period. Use an interrupt-driven gint
+   timer with waitevent(), not a CPU-burning delay. The timer remains reserved
+   until we stop it, so its callback cannot outlive this stack frame or race a
+   timer that another module has just obtained. If all timers are busy, start
+   immediately after draining any pending key event instead of requiring PLOT. */
+key_event_t navigation_wait_idle(int *idle)
+{
+    if(idle)*idle=0;
+#ifdef GL_HOST
+    key_event_t ev=getkey();
+    if(ev.type==KEYEV_NONE && !navigation_held(ev) && idle)*idle=1;
     return ev;
+#else
+    if(navigation_held((key_event_t){0}))return navigation_wait();
+    volatile int expired=0;
+    int timer=timer_configure(TIMER_ANY,NAVIGATION_IDLE_US,GINT_CALL_SET(&expired));
+    if(timer<0){
+        key_event_t ev=pollevent();
+        if(ev.type==KEYEV_NONE && idle)*idle=1;
+        return ev;
+    }
+    timer_start(timer);
+    key_event_t ev;
+    do { ev=waitevent(&expired); }
+    while(ev.type==KEYEV_HOLD && navigation_key(ev.key));
+    timer_stop(timer);
+    if(ev.type==KEYEV_NONE && expired && idle)*idle=1;
+    return ev;
+#endif
+}
+/* If held keys cancel out, or the camera has reached its pitch limit, wait
+   for a real key change instead of spinning and redrawing identical frames. */
+key_event_t navigation_wait_change(void)
+{
+#ifdef GL_HOST
+    return getkey();
+#else
+    for(;;){key_event_t ev=waitevent(NULL);if(ev.type!=KEYEV_HOLD)return ev;}
 #endif
 }

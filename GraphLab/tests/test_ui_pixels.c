@@ -25,7 +25,7 @@ static void capture3d(GraphState *s,char const *path){
     key_event_t keys[]={K(F2),K(F6),K(F6),K(EXIT),K(EXIT),K(F6)};
     host_keys(keys,sizeof keys/sizeof keys[0]);host_snapshot_on_getkey(3,path);
     assert(graphlab_main()==0&&host_keys_used()==sizeof keys/sizeof keys[0]);
-    assert(host_calculation_count()==1&&host_partial_updates()==0&&host_vram_guards_ok());
+    assert(host_calculation_count()==6&&host_partial_updates()==0&&host_vram_guards_ok());
     FILE *f=fopen(path,"rb");assert(f);char header[64];
     assert(fgets(header,sizeof header,f)&&fgets(header,sizeof header,f)&&fgets(header,sizeof header,f));
     assert(fread(image,1,sizeof image,f)==sizeof image);fclose(f);unlink(path);
@@ -47,15 +47,17 @@ int main(void){
     int blue=0;for(int y=66;y<=72;y++)for(int x=235;x<=241;x++)blue+=color(x,y,C_RGB(2,10,26));
     assert(blue>0); /* later equality boundary remains above shaded area */
     static unsigned char sphere[DWIDTH*DHEIGHT*3];
-    state_defaults(&s);s.render3_mode=1;strcpy(s.surface[0].formula,"x^2+y^2+z^2=1");
+    state_defaults(&s);s.legacy_render_mode=2;strcpy(s.surface[0].formula,"x^2+y^2+z^2=1");
     capture3d(&s,"/tmp/gl-sphere.ppm");memcpy(sphere,image,sizeof sphere);
     strcpy(s.surface[0].formula,"(x^2+y^2+z^2-1)^2=0");
     capture3d(&s,"/tmp/gl-squared-sphere.ppm");assert(!memcmp(sphere,image,sizeof sphere));
-    s.render3_mode=0;strcpy(s.surface[0].formula,"x^2+y^2+z^2=1");
-    capture3d(&s,"/tmp/gl-voxel-sphere.ppm");memcpy(sphere,image,sizeof sphere);
+    /* Historical mode and grid bytes may be present in GLAB8; neither can
+       re-enable an old engine or affect any pixel in this version. */
+    s.legacy_render_mode=0;s.legacy_grid_div=64;strcpy(s.surface[0].formula,"x^2+y^2+z^2=1");
+    capture3d(&s,"/tmp/gl-legacy-sphere.ppm");assert(!memcmp(sphere,image,sizeof sphere));
     strcpy(s.surface[0].formula,"(x^2+y^2+z^2-1)^2=0");
-    capture3d(&s,"/tmp/gl-voxel-squared-sphere.ppm");assert(!memcmp(sphere,image,sizeof sphere));
-    char path[256];snprintf(path,sizeof path,"%s/GLAB4_A.DAT",dir);unlink(path);
-    snprintf(path,sizeof path,"%s/GLAB4_B.DAT",dir);unlink(path);rmdir(dir);
-    puts("UI pixels: 2D inequality overlays and equivalent RAY/VOXEL zero-surface formula passed.");
+    capture3d(&s,"/tmp/gl-legacy-squared-sphere.ppm");assert(!memcmp(sphere,image,sizeof sphere));
+    char path[256];snprintf(path,sizeof path,"%s/GLAB8_A.DAT",dir);unlink(path);
+    snprintf(path,sizeof path,"%s/GLAB8_B.DAT",dir);unlink(path);rmdir(dir);
+    puts("UI pixels: 2D inequality overlays and equivalent Ray zero-surface formula and ignored legacy mode bytes passed.");
 }

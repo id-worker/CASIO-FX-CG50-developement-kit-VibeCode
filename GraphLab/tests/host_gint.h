@@ -42,7 +42,7 @@ enum {
  KEY_0=0x11,KEY_DOT=0x12,KEY_EXP=0x13,KEY_NEG=0x14,KEY_EXE=0x15
 };
 enum {KEYEV_NONE=0,KEYEV_DOWN=1,KEYEV_UP=2,KEYEV_HOLD=3,KEYEV_OSMENU=4};
-typedef struct {int key,type,shift,alpha,mod,held_shift,held_alpha;uint32_t held_motion;} key_event_t;
+typedef struct {int key,type,shift,alpha,mod,held_shift,held_alpha;uint32_t held_motion;uint16_t time;} key_event_t;
 key_event_t getkey(void);
 int keydown(int key);
 key_event_t pollevent(void);
@@ -52,6 +52,8 @@ void host_keys(key_event_t const *keys,size_t count);
 void host_async_key(key_event_t key,int after_polls);
 /* Deliver an asynchronous key only during a selected calculation (1-based). */
 void host_async_on_calculation(key_event_t key,int calculation,int after_polls);
+/* Synthetic keyboard scan ticks advance only when configured by a test. */
+void host_tick_per_poll(unsigned ticks);
 size_t host_keys_used(void);
 unsigned host_frames(void);
 void host_snapshot_on_frame(unsigned frame,const char *path);
@@ -65,6 +67,9 @@ void host_calculation_begin(void);
 void host_calculation_end(void);
 int host_calculation_count(void);
 int host_partial_updates(void);
+int host_partial_colored_frames(void);
+int host_partial_min_colored(void);
+int host_partial_max_colored(void);
 int host_polls_outside_calculation(void);
 
 #endif

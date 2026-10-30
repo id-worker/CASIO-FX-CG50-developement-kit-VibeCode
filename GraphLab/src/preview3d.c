@@ -8,15 +8,22 @@
 #define ZW ((PLOT_W+1)/2)
 #define ZH ((PLOT_H+1)/2)
 
+void preview3d_set_step(Preview3D *p,int step)
+{
+    if(!p)return;
+    int next=(step==2||step==4||step==8)?step:PREVIEW3D_STEP;
+    if(p->point&&p->step!=next)preview3d_free(p);
+    p->step=next;
+}
 int preview3d_begin(Preview3D *p,Volume const *v,Camera const *c)
 {
     if(!p||!v||!c||!isfinite(v->radius)||v->radius<=0||v->div<1||
        !isfinite(v->x)||!isfinite(v->y)||!isfinite(v->z)||
        !isfinite(c->eye_x)||!isfinite(c->eye_y)||!isfinite(c->eye_z)||
        !isfinite(c->yaw)||!isfinite(c->pitch)||!isfinite(c->zoom)||c->zoom<.1f||c->zoom>5)return 0;
-    preview3d_free(p);p->volume=*v;p->captured=*c;
-    p->capacity=((PLOT_W+PREVIEW3D_STEP-1)/PREVIEW3D_STEP)*
-                ((PLOT_H+PREVIEW3D_STEP-1)/PREVIEW3D_STEP);
+    int step=(p->step==2||p->step==4||p->step==8)?p->step:PREVIEW3D_STEP;
+    preview3d_free(p);p->volume=*v;p->captured=*c;p->step=step;
+    p->capacity=((PLOT_W+step-1)/step)*((PLOT_H+step-1)/step);
     p->point=malloc((size_t)p->capacity*sizeof *p->point);
     if(!p->point){p->capacity=0;return 0;}
     return 1;
@@ -67,7 +74,7 @@ void preview3d_aux_add(Preview3D *p,float x,float y,float z,uint16_t color)
 void preview3d_add(Preview3D *p,int x,int y,float wx,float wy,float wz,uint16_t color)
 {
     if(!p||!p->point||p->count>=p->capacity||x<PLOT_X0||x>PLOT_X1||y<PLOT_Y0||y>PLOT_Y1||
-       (x-PLOT_X0)%PREVIEW3D_STEP||(y-PLOT_Y0)%PREVIEW3D_STEP||
+       ((x-PLOT_X0)&(p->step-1))||((y-PLOT_Y0)&(p->step-1))||
        !isfinite(wx)||!isfinite(wy)||!isfinite(wz))return;
     Volume const *v=&p->volume;
     float a=(wx-v->x)/v->radius,b=(wy-v->y)/v->radius,c=(wz-v->z)/v->radius;
@@ -111,7 +118,7 @@ static int fixed_preview(Preview3D const *p,Camera const *c,uint16_t *depth)
     float nf=camera_near_normalized(r)*32767.0f;
     if(!isfinite(nf)||nf>400000||nf<0)return 0;
     int nearq=(int)ceilf(nf);if(nearq<1)nearq=1;
-    int scale=(int)lroundf(PREVIEW3D_STEP*ratio*256.0f);
+    int scale=(int)lroundf(p->step*ratio*256.0f);
     for(int i=0;i<ZW*ZH;i++)depth[i]=65535;
     for(int i=0;i<p->count+p->aux_count;i++){
         int aux=i>=p->count;
@@ -197,7 +204,7 @@ int preview3d_draw(Preview3D *p,Camera const *c)
         if(!isfinite(sx)||!isfinite(sy2)||sx<PLOT_X0-12||sx>PLOT_X1+12||sy2<PLOT_Y0-12||sy2>PLOT_Y1+12)continue;
         float odx=x-ox,ody=y-oy,odz=z-oz,ory=osy*odx+ocy*ody;
         float oldz=-ocp*ory-osp*odz;
-        float size=aux?3.0f:PREVIEW3D_STEP*(oldz/zz)*(c->zoom/p->captured.zoom);
+        float size=aux?3.0f:p->step*(oldz/zz)*(c->zoom/p->captured.zoom);
         if(!isfinite(size))continue;
         if(size<2)size=2;
         if(size>12)size=12;

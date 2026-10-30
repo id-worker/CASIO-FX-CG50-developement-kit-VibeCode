@@ -10,8 +10,8 @@
 #define PLOT_W (PLOT_X1-PLOT_X0+1)
 #define PLOT_H (PLOT_Y1-PLOT_Y0+1)
 #define PLOT_MAX_DIV 48
-/* Limit for the retained legacy in-memory Mesh API only. The GraphLab 1.02
-   UI uses ray3d_render() or voxel3d_render(), not a polygonal surface mesh. */
+/* Limit for the retained legacy in-memory Mesh API only. Final 3D PLOT uses
+   RAY; the independent optional Preview has its own mesh limits. */
 #define PLOT_MAX_TRIANGLES 6000
 
 typedef struct { float xmin,xmax,ymin,ymax; int cols,rows; float period_x; } PlaneView;

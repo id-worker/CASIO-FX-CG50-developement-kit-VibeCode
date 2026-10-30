@@ -42,6 +42,11 @@ int main(void)
     host_keys(fail_inner,N(fail_inner));assert(graphlab_test_editor(text,1));
     assert(!strcmp(text,original) && attempt==2 && created==1 && freed==1 && live==0);
     assert(host_keys_used()==N(fail_inner));
+    /* A direct first digit also preserves the outer editor on allocation failure. */
+    reset(2);key_event_t fail_direct[]={K(OPTN),K(DOWN),K(5),K(EXIT),K(EXE)};
+    host_keys(fail_direct,N(fail_direct));assert(graphlab_test_editor(text,1));
+    assert(!strcmp(text,original)&&attempt==2&&created==1&&freed==1&&live==0);
+    assert(host_keys_used()==N(fail_direct));
     reset(0);key_event_t nested[]={K(OPTN),K(DOWN),K(EXE),K(EXE),K(EXIT),K(EXE)};
     host_keys(nested,N(nested));assert(graphlab_test_editor(text,1));
     assert(!strcmp(text,original) && attempt==2 && created==2 && freed==2 && live==0);

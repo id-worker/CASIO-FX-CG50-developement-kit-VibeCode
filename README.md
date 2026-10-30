@@ -4,7 +4,8 @@ A collection of native `.g3a` programs and developer resources for the
 **CASIO fx-CG50**. Suite release **v1.02** collects the five applications
 below. The suite number is separate from each application's version. The
 calculator interfaces are in English; detailed project guides are mostly in
-Russian.
+Russian. **GraphLab 1.20 is now available as a separate update**; the v1.02
+suite itself remains unchanged.
 
 > **Testing status:** these builds passed computer-side checks. GraphLab,
 > Wireworld, PyCEdit and ObjView also have SuperH/QEMU tests with simulated
@@ -14,7 +15,7 @@ Russian.
 > not reproduce the calculator LCD, keyboard or Casio OS. Back up working
 > add-ins and data before updating.
 
-## Applications in v1.02
+## Applications in the unchanged v1.02 bundle
 
 | Application | Version | Description |
 |---|---:|---|
@@ -27,12 +28,20 @@ Russian.
 The five applications have new text-free grey menu icons, with a neutral grey
 selected icon. Application names are drawn by the calculator menu. Whether
 Casio OS adds its own blue selection effect needs a physical-device check.
-The four programs other than PyCEdit have unchanged executable payloads;
-only their icon fields and container checksums changed.
+In the original v1.02 bundle, the four programs other than PyCEdit had
+unchanged executable payloads; only their icon fields and container checksums
+changed. GraphLab 1.20 is a later code update.
 
 ![Computer preview of the five menu icons](docs/menu_icons.png)
 
-The [`releases/`](releases/) folder contains the current `.g3a` files.
+The [`releases/`](releases/) folder retains the **v1.02 suite** files,
+including GraphLab 1.09. For the current GraphLab, use
+[`GraphLab/GraphLab.g3a`](GraphLab/GraphLab.g3a) or the separate
+[GraphLab 1.20 release](https://github.com/id-worker/CASIO-FX-CG50-developement-kit-VibeCode/releases/tag/graphlab-v1.20).
+It keeps Fast Ray as the only renderer, renamed Ray; the old VOXEL engine
+and mode selector are removed. Ray also handles approximate 3D inequalities.
+The latest GraphLab has not been tested on physical hardware.
+
 [GitHub release v1.02](https://github.com/id-worker/CASIO-FX-CG50-developement-kit-VibeCode/releases/tag/v1.02)
 provides one small installation ZIP and individual files. The previous v1.01
 and v1.0 releases remain available. [`Wireworld_1.64/`](Wireworld_1.64/) and
@@ -53,8 +62,10 @@ and v1.0 releases remain available. [`Wireworld_1.64/`](Wireworld_1.64/) and
    `torus` without the extension. Filename input accepts Latin letters,
    digits, `.`, `-`, `_` and `/`; spaces, parentheses and Cyrillic are not
    available. In the model viewer ALPHA affects movement, not rotation speed.
-5. GraphLab 1.09 imports older settings into its own `GLAB4_A/B.DAT` journal;
-   old versions do not read GLAB4. See the project guide before switching.
+5. The original suite GraphLab 1.09 imports into `GLAB4_A/B.DAT`. The separate
+   GraphLab 1.20 uses `GLAB8_A/B.DAT`, shared with 1.18/1.19, and imports
+   supported older journals. Back up all GraphLab data and the previous G3A
+   before switching or reverting; see the [project guide](GraphLab/README_RU.md).
 
 ## PyCEdit: highlighting and insertion lists
 
@@ -80,6 +91,8 @@ PicoC. See the PyCEdit guide for navigation and compatibility details.
 исправлено имя в меню на **PyCEdit**. Перед установкой сохрани старые аддины
 и файлы; если ставил `PyCLite.g3a`, удали именно старый аддин, не `.py`/`.c`.
 Внешний вид новых цветов и иконок на приборе пока нужно проверить.
+Отдельно доступна **GraphLab 1.20**: Fast Ray теперь называется Ray,
+VOXEL и выбор движка удалены. На реальном калькуляторе 1.20 не проверена.
 
 ## Building and checks
 
@@ -88,9 +101,10 @@ PicoC. See the PyCEdit guide for navigation and compatibility details.
 - Wireworld and PyCEdit: install a compatible libfxcg/PrizmSDK toolchain and
   `mkg3a`; set `FXCGSDK`, then run `make` in the project folder.
 - Translator: see [`source/README_BUILD.txt`](Translator/source/README_BUILD.txt).
-- `python3 release_tools/verify_icons.py` verifies the current G3As, icons,
-  names, checksums and recorded payload baselines; it is not a hardware test.
-  `release_tools/package_release.py` creates the small release ZIP.
+- `python3 release_tools/verify_icons.py` verifies the pinned v1.02 G3As and
+  icons plus the separate current GraphLab container; it is not a hardware test.
+  `release_tools/package_release.py` recreates the **unchanged v1.02** ZIP,
+  with its original GraphLab 1.09 rather than the later 1.20 update.
 
 [`win_gint/`](win_gint/) contains Windows Python resources and [`docs/`](docs/)
 contains PicoC material. These do not replace the separate

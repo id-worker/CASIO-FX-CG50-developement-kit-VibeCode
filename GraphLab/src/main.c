@@ -4,8 +4,8 @@
 #include "editor_meta.h"
 #include "plot.h"
 #include "plot2d.h"
-#include "voxel.h"
 #include "ray.h"
+#include "intersection.h"
 #include "fractal.h"
 #include "scroll.h"
 #include "input.h"
@@ -41,8 +41,7 @@ typedef struct {
     float param_a,param_b,param_c,param_t,period_x;
     float volume_x,volume_y,volume_z,volume_radius;
     float julia_re,julia_im,escape_radius;
-    uint8_t accuracy2,render3_mode,voxel_div;
-    int ray_quality;
+    uint8_t accuracy2,preview_quality,fast_ray_step,fast_ray_q;
 } SettingsSnapshot;
 static SettingsSnapshot settings_before;
 static void snapshot_settings(SettingsSnapshot *dst,GraphState const *s)
@@ -53,8 +52,7 @@ static void snapshot_settings(SettingsSnapshot *dst,GraphState const *s)
         .volume_z=s->volume_z,.volume_radius=s->volume_radius,
         .julia_re=s->fractal.julia_re,.julia_im=s->fractal.julia_im,
         .escape_radius=s->fractal.escape_radius,.accuracy2=s->accuracy2,
-        .render3_mode=s->render3_mode,.voxel_div=s->voxel_div,
-        .ray_quality=state_ray_quality(s)
+        .preview_quality=s->preview_quality,.fast_ray_step=s->fast_ray_step,.fast_ray_q=s->fast_ray_q
     };
 }
 static Parsed parsed;
@@ -154,11 +152,22 @@ static int aggregate_name_before(char const *text,int cursor)
     for(int i=0;i<4;i++)word[i]=(char)tolower((unsigned char)text[start+i]);
     word[4]=0;return !strcmp(word,"summ")||!strcmp(word,"prod");
 }
+static int editor_group_numerator(char *text,EditorMeta *meta,int *target,int fraction_node);
+static void editor_erase_range(char *text,EditorMeta *meta,int start,int end)
+{
+    int len=(int)strlen(text);
+    editor_meta_delete(meta,len,start,end);
+    memmove(text+start,text+end,(size_t)(len-end+1));
+}
 static void delete_text(char *text,int *cursor,EditorMeta *meta)
 {
     int len=(int)strlen(text);if(*cursor<=0)return;
     int end=*cursor,start=end-1;
     if(expr_parse_editor(&parsed,text,meta->mate,meta->comma_owner) && layout_measure(&parsed)){
+        /* A hidden numerator opener can share the same visual position with
+           a surrounding operator. Retry at its left boundary without walking
+           through an invisible source character or losing an operand. */
+retry_visible:
         /* Hidden closers of aggregates, fractions and powers are not the
            visible item the user intended to backspace. Move into the field. */
         for(int pass=0;pass<EXPR_NODES;pass++){
@@ -187,6 +196,26 @@ static void delete_text(char *text,int *cursor,EditorMeta *meta)
             end=inner;
         }
         start=layout_delete_start(&parsed,end);
+        /* At the beginning of a SUM/PROD term DEL must not become stuck on
+           the invisible comma. An empty term removes the whole template. For
+           a nonempty term, remove the operator and limits but keep its term
+           in the original parentheses, preserving all term content/grouping. */
+        int aggregate=-1,part=layout_sum_field(&parsed,end,&aggregate);
+        if(part==3 && aggregate>=0){
+            ExprNode const *n=&parsed.nodes[aggregate],*body=&parsed.nodes[n->extra];
+            if(end==body->start && start==end){
+                if(body->kind==N_HOLE){start=n->start;end=n->end;}
+                else {
+                    int open=n->op_pos>=0?n->op_pos:-n->op_pos-2;
+                    if(open>=n->start && open<body->start){
+                        int at=n->start;
+                        editor_erase_range(text,meta,open+1,body->start);
+                        editor_erase_range(text,meta,at,open);
+                        *cursor=at+1;return;
+                    }
+                }
+            }
+        }
         /* Protect function template delimiters too. Backspace from an empty
            unary function removes the function, not just its opening '('. */
         for(int i=0;i<parsed.count;i++){
@@ -196,7 +225,20 @@ static void delete_text(char *text,int *cursor,EditorMeta *meta)
             if(end==a->start && start==n->op_pos){
                 int other_empty=n->right<0 || parsed.nodes[n->right].kind==N_HOLE;
                 if(a->kind==N_HOLE && other_empty){start=n->start;end=n->end;}
-                else return;
+                else if(n->right<0){
+                    /* Remove a unary function name but keep its parentheses
+                       and argument. Thus 3*sin(1+2) becomes 3*(1+2), not
+                       3*1+2; an existing argument is never silently lost. */
+                    int at=n->start,open=n->op_pos;
+                    editor_erase_range(text,meta,at,open);
+                    *cursor=end-(open-at);return;
+                }else{
+                    /* Two arguments cannot be unwrapped into a valid scalar
+                       without inventing an operator. Move to the last
+                       nonempty argument; repeated DEL can then remove both. */
+                    ExprNode const *b=&parsed.nodes[n->right];
+                    *cursor=b->kind==N_HOLE?a->end:b->end;return;
+                }
                 break;
             }
             if(n->right>=0){
@@ -216,7 +258,14 @@ static void delete_text(char *text,int *cursor,EditorMeta *meta)
                 if(a->kind==N_GROUP && a->left>=0 && start==a->start && end==a->start+1){
                     if(parsed.nodes[a->left].kind==N_HOLE && b->kind==N_GROUP && b->left>=0 &&
                        parsed.nodes[b->left].kind==N_HOLE && b->right>=0){start=a->start;end=b->end;}
-                    else return;
+                    else {
+                        /* Backspace at the beginning of a numerator must
+                           reach the preceding visible item, not stop forever
+                           on the invisible grouping parenthesis. */
+                        end=n->start;
+                        if(end<=0){*cursor=0;return;}
+                        goto retry_visible;
+                    }
                     break;
                 }
             }
@@ -230,13 +279,19 @@ static void delete_text(char *text,int *cursor,EditorMeta *meta)
                     if(a->kind==N_GROUP && a->left>=0 && parsed.nodes[a->left].kind==N_HOLE)
                         start=a->start;
                 }
+            }else if(n->kind==N_DIV && n->left>=0){
+                /* A nonempty denominator is not deleted at its left edge.
+                   Move to the numerator (like UP) instead of getting stuck. */
+                ExprNode const *a=&parsed.nodes[n->left];
+                int target=(a->kind==N_GROUP && a->left>=0)?parsed.nodes[a->left].end:a->end;
+                if(editor_group_numerator(text,meta,&target,i))*cursor=target;
+                return;
             }else return;
             break;
         }
     }
     if(start<0 || start>=end || end>len)return;
-    editor_meta_delete(meta,len,start,end);
-    memmove(text+start,text+end,(size_t)(len-end+1));*cursor=start;
+    editor_erase_range(text,meta,start,end);*cursor=start;
 }
 static void formula_area(char const *text,int cursor,EditorMeta const *meta)
 {
@@ -372,7 +427,9 @@ static int editor_seed(char *destination,char const *title,int mode,key_event_t 
             dprint(10,151,ACCENT,"%s: %s   UP: upper  DOWN: lower",op,parts[sum_part]);
             dtext(10,166,MUTED,"SHIFT+LEFT: index  SHIFT+RIGHT: term");
         } else {
-            dtext(10,151,MUTED,"F5: 123 / abc / ABC   |   OPTN: settings");
+            dtext(10,151,MUTED,settings_active?
+                "F5: 123 / abc / ABC   |   EXIT: cancel":
+                "F5: 123 / abc / ABC   |   OPTN: settings");
             dtext(10,166,MUTED,"SHIFT+F5: symbols  |  RIGHT exits a group");
         }
         if(error[0])dtext(10,184,WARNING,error);
@@ -549,13 +606,59 @@ void graphlab_test_formula_area(char const *text,int cursor)
     dclear(C_WHITE);formula_area(text,cursor,&meta);
 }
 #endif
-static int begins_new_formula(key_event_t e)
+/* One list event has exactly one owner. Explicit list actions (F-keys,
+   PLOT, EXE, OPTN, UP/DOWN and EXIT) take priority in equations(). A first
+   editor action is passed to editor_seed once; EXE/F6 are never forwarded. */
+typedef enum {ENTRY_NONE,ENTRY_NEW,ENTRY_EDIT} EquationEntry;
+static EquationEntry equation_entry(key_event_t e)
 {
     int k=e.key;
-    if(k==KEY_DEL || (e.alpha && input_alpha_letter(k)))return 1;
-    if((k>=KEY_1 && k<=KEY_3)||(k>=KEY_4 && k<=KEY_6)||(k>=KEY_7 && k<=KEY_9)||k==KEY_0)return 1;
-    return k==KEY_XOT || k==KEY_SIN || k==KEY_COS || k==KEY_TAN || k==KEY_LN || k==KEY_LOG;
+    if(k==KEY_DEL || (e.alpha && input_alpha_letter(k)))return ENTRY_NEW;
+    if((k>=KEY_1 && k<=KEY_3)||(k>=KEY_4 && k<=KEY_6)||
+       (k>=KEY_7 && k<=KEY_9)||k==KEY_0)return ENTRY_NEW;
+    if(k==KEY_XOT || k==KEY_SIN || k==KEY_COS || k==KEY_TAN ||
+       k==KEY_LN || k==KEY_LOG)return ENTRY_NEW;
+    /* These keys already have editor semantics. Preserve the existing
+       expression so an operator/fraction/power does not silently replace it. */
+    switch(k){
+    case KEY_LEFT:case KEY_RIGHT:
+    case KEY_DOT:case KEY_ADD:case KEY_SUB:case KEY_NEG:case KEY_MUL:
+    case KEY_DIV:case KEY_FRAC:case KEY_LEFTP:case KEY_RIGHTP:case KEY_COMMA:
+    case KEY_POWER:case KEY_SQUARE:case KEY_FD:case KEY_EXP:
+        return ENTRY_EDIT;
+    case KEY_UP:case KEY_DOWN:case KEY_F5:
+        return e.shift?ENTRY_EDIT:ENTRY_NONE;
+    default:return ENTRY_NONE;
+    }
 }
+
+/* Numeric fields preserve their existing value for operators, but begin a
+   fresh value for a digit, decimal point, negative sign, constant or function.
+   Navigation and reserved interface keys are handled by each caller first. */
+static EquationEntry numeric_entry(key_event_t e)
+{
+    if(e.key==KEY_NEG||e.key==KEY_DOT||e.key==KEY_FD||e.key==KEY_EXP ||
+       (e.key==KEY_SQUARE && e.shift))return ENTRY_NEW;
+    return equation_entry(e);
+}
+/* Accept EXE/F1 without forwarding the interface event; all seeded calls
+   forward exactly one editor key. An aborted/invalid editor changes nothing. */
+static int numeric_value(float old,char const *title,key_event_t e,EquationEntry entry,float *out)
+{
+    char text[EXPR_MAX],error[90];
+    if(entry==ENTRY_NEW)text[0]=0;
+    else snprintf(text,sizeof text,"%.7g",(double)old);
+    if(!editor_seed(text,title,0,e,entry!=ENTRY_NONE) ||
+       !compile_formula(text,&scratch_program,error,sizeof error))return 0;
+    EvalVars zero={0};*out=expr_eval_real(&scratch_program,&zero);return 1;
+}
+#ifdef GL_EDITOR_TEST
+int graphlab_test_numeric_entry_event(key_event_t e){return (int)numeric_entry(e);}
+float graphlab_test_clip_radius(void){return app.volume_radius;}
+int graphlab_test_entry_event(key_event_t e){return (int)equation_entry(e);}
+int graphlab_test_seed_editor(char *destination,int mode,key_event_t e)
+{return editor_seed(destination,"TEST SEEDED EDITOR",mode,e,1);}
+#endif
 
 static void examples(Equation *eq,int is3)
 {
@@ -578,102 +681,131 @@ static void examples(Equation *eq,int is3)
 static void help(void);
 static void settings(void)
 {
-    /* Keep the world search cube anchored at the origin, independently of
-       the observer. Legacy center/follow fields remain only for save import. */
+    /* OPTN cycles pages. All map sampling is derived from pixels, not set here. */
     enum {S_WIDTH,S_RADIUS,S_A,S_B,S_C,S_T,S_JULIA_RE,S_JULIA_IM,
-          S_ESCAPE,S_PERIOD,S_ACCURACY,S_RENDER,S_RAY_Q,S_DIV,S_STEP,S_COUNT};
+          S_ESCAPE,S_PERIOD,S_ACCURACY,
+          S_FAST_STEP,S_FAST_Q,S_POINT,S_MAP_DOWN,S_MAP_UP,S_COUNT};
     char const *names[]={"2D line width (px)","3D clip half-size",
         "Parameter a","Parameter b","Parameter c","Parameter t","Julia c: real","Julia c: imaginary",
-        "Fractal escape radius","X period (0 = off)","2D accuracy (px)","3D renderer","Ray grid divisions",
-        "Voxel grid divisions","Voxel step (world)"};
+        "Fractal escape radius","X period (0 = off)","2D accuracy (px)",
+        "Ray start step (px)","Ray Q","Preview step (px)",
+        "Extend Z below clip","Extend Z above clip"};
     float *values[]={NULL,&app.volume_radius,&app.param_a,&app.param_b,&app.param_c,&app.param_t,
-        &app.fractal.julia_re,&app.fractal.julia_im,&app.fractal.escape_radius,&app.period_x,NULL,NULL,NULL,NULL,NULL};
-    int sel=0,off=0,count=S_COUNT;
+        &app.fractal.julia_re,&app.fractal.julia_im,&app.fractal.escape_radius,&app.period_x,
+        NULL,NULL,NULL,NULL,&app.map_extend_down,&app.map_extend_up};
+    int page=0,sel=0,off=0;
     settings_active++;
     for(;;){
+        int first=page==0?0:page==1?S_FAST_STEP:S_MAP_DOWN;
+        int count=page==0?S_FAST_STEP:page==1?S_MAP_DOWN-S_FAST_STEP:S_COUNT-S_MAP_DOWN;
         if(sel<off)off=sel;
         if(sel>=off+7)off=sel-6;
-        dclear(C_WHITE);header("SETTINGS","EXE TO EDIT");
-        for(int row=0;row<7 && row+off<count;row++){
-            int i=row+off,y=22+row*23;if(i==sel)drect_border(6,y,DWIDTH-7,y+20,C_WHITE,1,C_BLACK);
-            dtext(12,y+5,INK,names[i]);
-            if(i==S_WIDTH)dprint(218,y+5,ACCENT,"%d px  LEFT/RIGHT",app.curve_width);
-            else if(i==S_ACCURACY)dprint(218,y+5,ACCENT,"%.2g px",(double)accuracy_values[app.accuracy2]);
-            else if(i==S_RENDER)dtext(218,y+5,ACCENT,app.render3_mode?"RAY":"VOXEL");
-            else if(i==S_RAY_Q)dprint(218,y+5,ACCENT,"Q=%d  (4..48)",state_ray_quality(&app));
-            else if(i==S_DIV)dprint(218,y+5,ACCENT,"N=%d  (6..64)",app.voxel_div);
-            else if(i==S_STEP)dprint(218,y+5,ACCENT,"%.6g",(double)(2*app.volume_radius/app.voxel_div));
-            else dprint(218,y+5,ACCENT,"%.6g",(double)*values[i]);
+        dclear(C_WHITE);
+        if(page==2){
+            header("SETTINGS: MAP 3/3","OPTN: NEXT PAGE");
+            for(int i=0;i<2;i++){
+                int y=22+i*23;if(i==sel)drect_border(6,y,DWIDTH-7,y+20,C_WHITE,1,C_BLACK);
+                dtext(12,y+5,INK,names[S_MAP_DOWN+i]);
+                dprint(218,y+5,ACCENT,"%.6g",(double)*values[S_MAP_DOWN+i]);
+            }
+            dprint(9,76,INK,"Z range: %.6g .. %.6g",(double)(-app.volume_radius-app.map_extend_down),
+                   (double)(app.volume_radius+app.map_extend_up));
+            dtext(9,99,INK,"XY/Z spacing: one map pixel (automatic).");
+            dtext(9,119,INK,"F2 exact XY; arrows check whole pixel.");
+            dtext(9,139,INK,"F3 next found; F4 nearest mapped.");
+            if(notice[0])draw_notice();
+            else dtext(9,174,MUTED,"Extra Z expands beyond the clip; 0 = off.");
+        }else{
+            header(page==0?"SETTINGS: GENERAL 1/3":"SETTINGS: 3D 2/3","OPTN: NEXT PAGE");
+            for(int row=0;row<7 && row+off<count;row++){
+                int i=first+row+off,y=22+row*23;
+                if(row+off==sel)drect_border(6,y,DWIDTH-7,y+20,C_WHITE,1,C_BLACK);
+                dtext(12,y+5,INK,names[i]);
+                if(i==S_WIDTH)dprint(218,y+5,ACCENT,"%d px  LEFT/RIGHT",app.curve_width);
+                else if(i==S_ACCURACY)dprint(218,y+5,ACCENT,"%.2g px",(double)accuracy_values[app.accuracy2]);
+                else if(i==S_FAST_STEP)dprint(218,y+5,ACCENT,"%d px  (1..32)",app.fast_ray_step);
+                else if(i==S_FAST_Q)dprint(218,y+5,ACCENT,"Q=%d  (4..48)",app.fast_ray_q);
+                else if(i==S_POINT)dprint(218,y+5,ACCENT,"%d px  (1..32)",app.preview_ray_step);
+                else dprint(218,y+5,ACCENT,"%.6g",(double)*values[i]);
+            }
+            int current=first+sel;
+            if(notice[0])draw_notice();
+            else if(current==S_RADIUS)dtext(9,188,MUTED,"World clip is fixed at origin: -R to +R.");
+            else if(current==S_WIDTH)dtext(9,188,MUTED,"2D curve thickness in screen pixels.");
+            else if(current>=S_A && current<=S_T)dtext(9,188,MUTED,"Values used by letters in your formulas.");
+            else if(current==S_JULIA_RE || current==S_JULIA_IM)dtext(9,188,MUTED,"Julia mode only: fixed complex c.");
+            else if(current==S_ESCAPE)dtext(9,188,MUTED,"Fractal: distance marking escape.");
+            else if(current==S_PERIOD)dtext(9,188,MUTED,"0 = off; use only a true x period.");
+            else if(current==S_ACCURACY)dtext(9,188,MUTED,"Smaller = finer 2D contour refinement.");
+            else if(current==S_FAST_STEP)dtext(9,188,MUTED,"Initial step when no preview is ready.");
+            else if(current==S_FAST_Q)dtext(9,188,MUTED,"One Q for preview and final refinement.");
+            else if(current==S_POINT)dtext(9,188,MUTED,"Same renderer; smaller = finer and slower.");
         }
-        if(notice[0])draw_notice();
-        else if(sel==S_RADIUS)dtext(9,188,MUTED,"Cube is fixed at origin: -R to +R.");
-        else if(sel==S_WIDTH)dtext(9,188,MUTED,"2D curve thickness in screen pixels.");
-        else if(sel>=S_A && sel<=S_T)dtext(9,188,MUTED,"Values used by letters in your formulas.");
-        else if(sel==S_JULIA_RE || sel==S_JULIA_IM)dtext(9,188,MUTED,"Julia mode only: fixed complex c.");
-        else if(sel==S_ESCAPE)dtext(9,188,MUTED,"Fractal: distance marking escape.");
-        else if(sel==S_PERIOD)dtext(9,188,MUTED,"0 = off; use only a true x period.");
-        else if(sel==S_ACCURACY)dtext(9,188,MUTED,"Smaller = finer 2D contour refinement.");
-        else if(sel==S_RENDER)dtext(9,188,MUTED,"VOXEL: blocks  /  RAY: smooth, slower.");
-        else if(sel==S_RAY_Q)dtext(9,188,MUTED,"RAY search grid; 4..48, not a mesh.");
-        else if(sel==S_DIV || sel==S_STEP)dtext(9,188,MUTED,"Step = 2R/N. More N = finer blocks.");
         footer("EDIT",NULL,NULL,"HELP","SAVE","BACK");dupdate();key_event_t e=input_key();
         if(e.key==KEY_EXIT||e.key==KEY_F6){settings_active--;return;}
-        if(e.key==KEY_UP){sel=(sel+count-1)%count;clear_notice();}
-        else if(e.key==KEY_DOWN){sel=(sel+1)%count;clear_notice();}
-        else if(e.key==KEY_F5)save_now();
-        else if(e.key==KEY_F4)help();
-        else if(sel==S_WIDTH && (e.key==KEY_LEFT||e.key==KEY_RIGHT||e.key==KEY_EXE||e.key==KEY_F1)){
+        if(e.key==KEY_OPTN){page=(page+1)%3;sel=off=0;clear_notice();continue;}
+        if(e.key==KEY_F5&&!e.shift){save_now();continue;}
+        if(e.key==KEY_F4){help();continue;}
+        if(e.key==KEY_UP){sel=(sel+count-1)%count;clear_notice();continue;}
+        if(e.key==KEY_DOWN){sel=(sel+1)%count;clear_notice();continue;}
+        int item=first+sel;
+        if(item==S_WIDTH && (e.key==KEY_LEFT||e.key==KEY_RIGHT||e.key==KEY_EXE||e.key==KEY_F1)){
             int d=e.key==KEY_LEFT?-1:1;app.curve_width=(uint8_t)((app.curve_width-1+d+5)%5+1);clear_notice();
-        }
-        else if(sel==S_ACCURACY && (e.key==KEY_LEFT||e.key==KEY_RIGHT||e.key==KEY_EXE||e.key==KEY_F1)){
+        }else if(item==S_ACCURACY && (e.key==KEY_LEFT||e.key==KEY_RIGHT||e.key==KEY_EXE||e.key==KEY_F1)){
             int d=e.key==KEY_LEFT?-1:1;app.accuracy2=(uint8_t)((app.accuracy2+d+4)%4);clear_notice();
-        }
-        else if(sel==S_RENDER && (e.key==KEY_LEFT||e.key==KEY_RIGHT||e.key==KEY_EXE||e.key==KEY_F1)){
-            app.render3_mode^=1;clear_notice();
-        }
-        else if(sel==S_RAY_Q && (e.key==KEY_LEFT||e.key==KEY_RIGHT)){
-            int q=state_ray_quality(&app)+(e.key==KEY_LEFT?-1:1);
-            (void)state_set_ray_quality(&app,q);clear_notice();
-        }
-        else if(sel==S_DIV && (e.key==KEY_LEFT||e.key==KEY_RIGHT)){
-            int n=(int)app.voxel_div+(e.key==KEY_LEFT?-1:1);
-            if(n>=VOXEL_MIN_DIV&&n<=VOXEL_MAX_DIV)app.voxel_div=(uint8_t)n;
+        }else if((item==S_FAST_STEP||item==S_POINT)&&
+                 (e.key==KEY_LEFT||e.key==KEY_RIGHT)){
+            uint8_t *step=item==S_FAST_STEP?&app.fast_ray_step:&app.preview_ray_step;
+            int next=(int)*step+(e.key==KEY_LEFT?-1:1);
+            if(next>=1&&next<=32)*step=(uint8_t)next;
             clear_notice();
-        }
-        else if((e.key==KEY_EXE||e.key==KEY_F1) && (values[sel]||sel==S_RAY_Q||sel==S_DIV||sel==S_STEP)) {
-            char temp[EXPR_MAX],err[90];
-            float old=values[sel]?*values[sel]:sel==S_RAY_Q?(float)state_ray_quality(&app):
-                      sel==S_DIV?(float)app.voxel_div:2*app.volume_radius/app.voxel_div;
-            snprintf(temp,sizeof temp,"%.7g",(double)old);
-            if(editor(temp,names[sel],0) && compile_formula(temp,&scratch_program,err,sizeof err)) {
-                EvalVars vars={0};float x=expr_eval_real(&scratch_program,&vars);
-                if(sel==S_RAY_Q){
-                    if(!isfinite(x)||x<4||x>48||fabsf(x-roundf(x))>.00001f||!state_set_ray_quality(&app,(int)lroundf(x)))
+        }else if(item==S_FAST_Q && (e.key==KEY_LEFT||e.key==KEY_RIGHT)){
+            int q=app.fast_ray_q+(e.key==KEY_LEFT?-1:1);
+            if(q>=4&&q<=48)app.fast_ray_q=(uint8_t)q;
+            clear_notice();
+        }else if(numeric_entry(e)!=ENTRY_NONE ||
+                ((e.key==KEY_EXE||e.key==KEY_F1) && (values[item]||item==S_FAST_Q||item==S_FAST_STEP||item==S_POINT))) {
+            float old=values[item]?*values[item]:item==S_WIDTH?(float)app.curve_width:
+                      item==S_ACCURACY?accuracy_values[app.accuracy2]:item==S_FAST_Q?(float)app.fast_ray_q:item==S_FAST_STEP?(float)app.fast_ray_step:
+                      item==S_POINT?(float)app.preview_ray_step:0;
+            float x;EquationEntry entry=numeric_entry(e);
+            if(numeric_value(old,names[item],e,entry,&x)) {
+                if(item==S_WIDTH){
+                    if(!isfinite(x)||x<1||x>5||fabsf(x-roundf(x))>.00001f)
+                        snprintf(notice,sizeof notice,"Width requires an integer from 1 to 5.");
+                    else {app.curve_width=(uint8_t)lroundf(x);snprintf(notice,sizeof notice,"Width updated. F5 saves the settings.");}
+                }else if(item==S_ACCURACY){
+                    int index=-1;if(isfinite(x))for(int i=0;i<4;i++)if(fabsf(x-accuracy_values[i])<.00001f)index=i;
+                    if(index<0)snprintf(notice,sizeof notice,"Choose 0.25, 0.5, 1 or 2 pixels.");
+                    else {app.accuracy2=(uint8_t)index;snprintf(notice,sizeof notice,"Accuracy updated. F5 saves the settings.");}
+                }else if(item==S_FAST_Q){
+                    if(!isfinite(x)||x<4||x>48||fabsf(x-roundf(x))>.00001f)
                         snprintf(notice,sizeof notice,"Ray grid requires an integer Q from 4 to 48.");
-                    else snprintf(notice,sizeof notice,"Ray grid updated. F5 saves the settings.");
-                }else if(sel==S_DIV||sel==S_STEP){
-                    float n=sel==S_DIV?x:(isfinite(x)&&x>0?2*app.volume_radius/x:NAN);
-                    if(!isfinite(n)||n<VOXEL_MIN_DIV-.49f||n>VOXEL_MAX_DIV+.49f ||
-                       (sel==S_DIV && fabsf(n-roundf(n))>.00001f))
-                        snprintf(notice,sizeof notice,"Grid requires an integer N from 6 to 64.");
-                    else {app.voxel_div=(uint8_t)lroundf(n);snprintf(notice,sizeof notice,"Grid updated; step is 2R/N. F5 saves.");}
+                    else {app.fast_ray_q=(uint8_t)lroundf(x);
+                        snprintf(notice,sizeof notice,"Ray grid updated. F5 saves the settings.");}
+                }else if(item==S_FAST_STEP||item==S_POINT){
+                    if(!isfinite(x)||x<1||x>32||fabsf(x-roundf(x))>.00001f)
+                        snprintf(notice,sizeof notice,"Step requires an integer from 1 to 32.");
+                    else {if(item==S_FAST_STEP)app.fast_ray_step=(uint8_t)lroundf(x);else app.preview_ray_step=(uint8_t)lroundf(x);
+                        snprintf(notice,sizeof notice,"Step updated. F5 saves the settings.");}
                 }else{
-                    *values[sel]=x;
-                    if(!state_validate(&app)){*values[sel]=old;snprintf(notice,sizeof notice,"Value is not finite or outside allowed range.");}
+                    *values[item]=x;
+                    if(!state_validate(&app)){*values[item]=old;snprintf(notice,sizeof notice,"Value is not finite or outside allowed range.");}
                     else snprintf(notice,sizeof notice,"Value updated. F5 saves the settings.");
                 }
             }
         }
     }
 }
+
 static void help(void)
 {
     dclear(C_WHITE);header("GRAPH LAB HELP","OFFLINE / fx-CG50");
-    dtext(8,24,INK,"PLOT: choose view, then PLOT / EXE draws.");
+    dtext(8,24,INK,"3D: auto when still. 2D: PLOT / EXE.");
     dtext(8,42,INK,"OPTN: settings. F5 saves in menus.");
     dtext(8,60,INK,"3D: arrows turn; 8/5 front/back; 4/6 side.");
     dtext(8,78,INK,"3D: 1/0 up/down; ALPHA slow; SHIFT fast.");
-    dtext(8,96,INK,"3D F2 resets; F4 quality; OPTN clip range.");
+    dtext(8,96,INK,"3D: 2 map; SHIFT+VARS eye; F4 quality.");
     dtext(8,114,INK,"Editor F5: 123/abc/ABC; SHIFT+F5 symbols.");
     dtext(8,132,INK,"FRAC: UP/DOWN fields; RIGHT exits.");
     dtext(8,148,INK,"SUM: SHIFT+UP/DOWN bounds inside a fraction.");
@@ -683,18 +815,158 @@ static void help(void)
     for(;;){key_event_t e=input_key();if(e.key==KEY_EXIT||e.key==KEY_EXE||e.key==KEY_F6)break;}
 }
 
-typedef struct {int cancel,menu,next;} Progress;
-/* The physical screen retains the previous complete frame while calculations
-   draw into VRAM. Polling never calls dupdate(), so partial plots are hidden. */
+static void present3d(Camera const *cam,uint16_t const *layer,int ready,int slow,int fast,
+                      int empty,int previewing,int drawn_step,int drawn_progress);
+typedef struct {
+    int cancel,menu,next,frame_done,frame_total,motion,command;
+    int track_shift,track_alpha,motion_shift,motion_alpha,command_shift,command_alpha;
+    key_event_t motion_event,command_event;
+    /* Optional, time-throttled intermediate display during a final ray pass. */
+    Camera const *live_cam;uint16_t const *live_layer;
+    int live_slow,live_started,live_row;uint16_t live_tick;
+} Progress;
+/* Standard retains the previous complete screen while calculating. Dev
+   deliberately displays a throttled sequence of intermediate frames. */
 static int progress(int done,int total,void *context)
 {
     (void)done;(void)total;Progress *p=context;key_event_t ev;
+#ifdef GL_DEV
+    /* About ten frames per pass, plus a bounded fallback for long work at
+       the same progress value. Fast explicit 2D still has visible steps. */
+    if(total!=p->frame_total||done<p->frame_done){p->frame_total=total;p->frame_done=0;}
+    int stride=total/10;if(stride<1)stride=1;
+    if((done>0&&done<total&&done-p->frame_done>=stride)||++p->next>=256){
+        p->frame_done=done;p->next=0;dupdate();
+    }
+#endif
     while((ev=pollevent()).type!=KEYEV_NONE){
         if(ev.type==KEYEV_DOWN && ev.key==KEY_EXIT){p->cancel=1;return 0;}
         if(ev.type==KEYEV_DOWN && ev.key==KEY_MENU){p->menu=1;return 0;}
     }
     return 1;
 }
+/* Raw pollevent() events have no enriched modifiers. Track queued SHIFT /
+   ALPHA transitions so a quick movement is not lost or slowed incorrectly if
+   the keys were already released by the time the callback handles it. */
+static void progress_modifiers(Progress *p,key_event_t ev)
+{
+    if(ev.key==KEY_SHIFT){if(ev.type==KEYEV_DOWN)p->track_shift=1;else if(ev.type==KEYEV_UP)p->track_shift=0;}
+    if(ev.key==KEY_ALPHA){if(ev.type==KEYEV_DOWN)p->track_alpha=1;else if(ev.type==KEYEV_UP)p->track_alpha=0;}
+}
+static void progress_capture_motion(Progress *p,key_event_t ev)
+{
+    p->motion=1;p->motion_event=ev;
+    p->motion_shift=p->track_shift||keydown(KEY_SHIFT)||(ev.mod&&ev.shift);
+    p->motion_alpha=p->track_alpha||keydown(KEY_ALPHA)||(ev.mod&&ev.alpha);
+#ifdef GL_HOST
+    p->motion_shift|=ev.held_shift;p->motion_alpha|=ev.held_alpha;
+#endif
+}
+/* These commands must remain usable when automatic refinement has already
+   started; handle them in the normal 3D event loop after stopping a stage. */
+static int progress_is_command(int key)
+{
+    return key==KEY_F2||key==KEY_F3||key==KEY_F4||key==KEY_F5||
+           key==KEY_OPTN||key==KEY_VARS||key==KEY_2;
+}
+static void progress_capture_command(Progress *p,key_event_t ev)
+{
+    p->command=1;p->command_event=ev;
+    p->command_shift=p->track_shift||keydown(KEY_SHIFT)||(ev.mod&&ev.shift);
+    p->command_alpha=p->track_alpha||keydown(KEY_ALPHA)||(ev.mod&&ev.alpha);
+#ifdef GL_HOST
+    p->command_shift|=ev.held_shift;p->command_alpha|=ev.held_alpha;
+#endif
+}
+/* During progressive refinement, camera motion cancels the incomplete stage. */
+static int progressive_progress(int done,int total,void *context)
+{
+    Progress *p=context;key_event_t ev;
+    while((ev=pollevent()).type!=KEYEV_NONE){
+        progress_modifiers(p,ev);
+        if(ev.type==KEYEV_DOWN&&(ev.key==KEY_EXIT||ev.key==KEY_F1)){p->cancel=1;return 0;}
+        if(ev.type==KEYEV_DOWN&&ev.key==KEY_MENU){p->menu=1;return 0;}
+        if((ev.type==KEYEV_DOWN||ev.type==KEYEV_HOLD)&&navigation_key(ev.key)){
+            progress_capture_motion(p,ev);return 0;
+        }
+        if(ev.type==KEYEV_DOWN&&progress_is_command(ev.key)){
+            progress_capture_command(p,ev);return 0;
+        }
+    }
+#ifndef GL_HOST
+    if(navigation_held((key_event_t){0})){
+        progress_capture_motion(p,(key_event_t){.type=KEYEV_NONE});return 0;
+    }
+#endif
+    /* The keyboard scanner's 16-bit tick runs at 128 Hz by default. Update
+       at most once per ~2 s, only after another scanline has completed.
+       Unsigned subtraction handles wraparound. No extra ray is computed. */
+    if(p->live_cam && p->live_layer && total==PLOT_H){
+        uint16_t now=ev.time;
+        if(!p->live_started){p->live_started=1;p->live_tick=now;p->live_row=done;}
+        else if(done>p->live_row && (uint16_t)(now-p->live_tick)>=256){
+            p->live_row=done;p->live_tick=now;
+            present3d(p->live_cam,p->live_layer,1,p->live_slow,0,0,2,1,done*100/PLOT_H);
+        }
+    }
+    return 1;
+}
+/* While building a moving preview, catch NEW presses but do not abort merely
+   because the original movement key is still held. */
+static int preview_progress(int done,int total,void *context)
+{
+    (void)done;(void)total;Progress *p=context;key_event_t ev;
+    while((ev=pollevent()).type!=KEYEV_NONE){
+        progress_modifiers(p,ev);
+        if(ev.type==KEYEV_DOWN&&ev.key==KEY_EXIT){p->cancel=1;return 0;}
+        if(ev.type==KEYEV_DOWN&&ev.key==KEY_MENU){p->menu=1;return 0;}
+        if(ev.type==KEYEV_DOWN&&navigation_key(ev.key)){
+            progress_capture_motion(p,ev);return 0;
+        }
+    }
+    return 1;
+}
+static void apply_progress_motion(Progress const *p,int slow_lock,int alpha_down)
+{
+    uint32_t held=navigation_held(p->motion_event);
+    if(p->motion_event.type==KEYEV_DOWN||p->motion_event.type==KEYEV_HOLD)
+        held|=navigation_key(p->motion_event.key);
+    if(held)navigation_step(&app,held,slow_lock||alpha_down||p->motion_alpha,p->motion_shift);
+}
+#ifdef GL_PROGRESS_TEST
+/* Target tests use actual gint keydev events; omitted from production. */
+static Progress progress_test;
+void graphlab_test_progress_init(void)
+{
+    memset(&progress_test,0,sizeof progress_test);
+    progress_test.track_shift=keydown(KEY_SHIFT);progress_test.track_alpha=keydown(KEY_ALPHA);
+}
+int graphlab_test_progress_poll(int preview)
+{
+    return preview?preview_progress(0,1,&progress_test):progressive_progress(0,1,&progress_test);
+}
+int graphlab_test_progress_key(void){return progress_test.motion?progress_test.motion_event.key:0;}
+int graphlab_test_progress_shift(void){return progress_test.motion_shift;}
+int graphlab_test_progress_command(void){return progress_test.command?progress_test.command_event.key:0;}
+int graphlab_test_progress_command_shift(void){return progress_test.command_shift;}
+int graphlab_test_progress_menu(void){return progress_test.menu;}
+int graphlab_test_progress_cancel(void){return progress_test.cancel;}
+void graphlab_test_progress_apply(GraphState *s)
+{
+    app=*s;apply_progress_motion(&progress_test,0,0);*s=app;
+}
+/* Real progress/render code linked to fake display by the SH/QEMU harness. */
+void graphlab_test_live_init(Camera const *cam,uint16_t const *layer)
+{
+    memset(&progress_test,0,sizeof progress_test);memset(&app,0,sizeof app);
+    app.fast_ray_q=8;
+    progress_test.live_cam=cam;progress_test.live_layer=layer;
+}
+int graphlab_test_live_poll(int done,int total,void *unused)
+{
+    (void)unused;return progressive_progress(done,total,&progress_test);
+}
+#endif
 static void calculation_begin(void)
 {
 #ifdef GL_HOST
@@ -746,6 +1018,12 @@ static void line_masks_draw(unsigned char const *masks,int width)
 static int changed_common(GraphState const *a,SettingsSnapshot const *b)
 {
     return a->param_a!=b->param_a||a->param_b!=b->param_b||a->param_c!=b->param_c||a->param_t!=b->param_t;
+}
+static int changed_3d(GraphState const *a,SettingsSnapshot const *b)
+{
+    return changed_common(a,b)||a->period_x!=b->period_x||
+        a->volume_x!=b->volume_x||a->volume_y!=b->volume_y||a->volume_z!=b->volume_z||
+        a->volume_radius!=b->volume_radius||a->fast_ray_q!=b->fast_ray_q;
 }
 static int compile_active(int is3)
 {
@@ -834,7 +1112,7 @@ static void draw_axes2d(PlaneView const *v)
     dwindow_set(old);
 }
 typedef struct {
-    PlaneView const *view;unsigned char *mask;int dashed,phase;
+    PlaneView const *view;unsigned char *mask;int dashed,phase,color;
     int x0,y0,x1,y1; /* inclusive screen clip for newly computed pixels */
 } LineContext;
 static void draw_segment(float x0,float y0,float x1,float y1,void *context)
@@ -854,6 +1132,10 @@ static void draw_segment(float x0,float y0,float x1,float y1,void *context)
            (!c->dashed || (c->phase%9)<5)){
             size_t i=(size_t)(b-PLOT_Y0)*PLOT_W+(a-PLOT_X0);
             c->mask[i>>3]|=(unsigned char)(1u<<(i&7));
+#ifdef GL_DEV
+            /* Normally 2D lines live in masks; Dev paints the running trace. */
+            dpixel(a,b,c->color);
+#endif
         }
         c->phase++;
         if(a==d && b==e)break;
@@ -970,15 +1252,15 @@ static int point_editor(char const *title,float *x,float *y,float *z)
             if(i==sel)drect_border(10,38+i*31,DWIDTH-11,64+i*31,C_WHITE,1,C_BLACK);
             dprint(16,45+i*31,INK,"%s = %.7g",names[i],(double)*v[i]);
         }
-        dtext(12,157,MUTED,"EXE: enter an exact coordinate.");
+        dtext(12,157,MUTED,"Type value or EXE: edit coordinate.");
         footer("EDIT",NULL,NULL,NULL,NULL,"DONE");dupdate();key_event_t e=input_key();
         if(e.key==KEY_EXIT||e.key==KEY_F6)return changed;
         if(e.key==KEY_UP)sel=(sel+count-1)%count;
         else if(e.key==KEY_DOWN)sel=(sel+1)%count;
-        else if(e.key==KEY_F1||e.key==KEY_EXE){
-            char temp[EXPR_MAX],error[90];snprintf(temp,sizeof temp,"%.7g",(double)*v[sel]);
-            if(editor(temp,"COORDINATE",0) && compile_formula(temp,&scratch_program,error,sizeof error)){
-                EvalVars vars={0};float next=expr_eval_real(&scratch_program,&vars);
+        else if(e.key==KEY_F1||e.key==KEY_EXE||numeric_entry(e)!=ENTRY_NONE||e.key==KEY_F5){
+            float next;EquationEntry entry=numeric_entry(e);
+            if(e.key==KEY_F5&&entry==ENTRY_NONE)entry=ENTRY_EDIT;
+            if(numeric_value(*v[sel],"COORDINATE",e,entry,&next)){
                 if(isfinite(next)&&fabsf(next)<=1e6f){if(*v[sel]!=next)changed=1;*v[sel]=next;}
                 else message("COORDINATE","Value must be finite and within +/-1000000.");
             }
@@ -1049,7 +1331,7 @@ static int render2d_region(PlaneView const *screen,PlaneView const *grid,
         int cx0=PLOT_X0+rect.x0,cy0=PLOT_Y0+rect.y0;
         int cx1=PLOT_X0+rect.x1,cy1=PLOT_Y0+rect.y1;
         LineContext line={.view=screen,.mask=masks+(size_t)i*LINE_MASK_BYTES,
-            .dashed=relation==REL_LT||relation==REL_GT,.phase=0,
+            .dashed=relation==REL_LT||relation==REL_GT,.phase=0,.color=palette[i],
             .x0=cx0,.y0=cy0,.x1=cx1,.y1=cy1};
         FillContext fill={.color=fill_color(i),.relation=relation,.screen=screen,
             .sample=screen,.grid=grid,.x0=cx0,.y0=cy0,.x1=cx1,.y1=cy1,
@@ -1209,147 +1491,368 @@ static void probe3d(void)
         else dprint(13,111,WARNING,"F%d undefined / sum not converged",slot+1);
         dprint(13,134,MUTED,"Eye: %.4g, %.4g, %.4g",(double)app.eye_x,(double)app.eye_y,(double)app.eye_z);
         dprint(13,152,MUTED,"Clip cube half-size: %.4g",(double)app.volume_radius);
-        dtext(13,172,MUTED,"EXE: exact value   +/-: adjust selected axis");
+        dtext(13,172,MUTED,"Type / EXE: exact   +/-: adjust selected axis");
         footer("NEXT",NULL,NULL,NULL,NULL,"BACK");dupdate();key_event_t e=input_key();
         if(e.key==KEY_EXIT||e.key==KEY_F6||e.key==KEY_VARS)break;
         if(e.key==KEY_LEFT)axis=(axis+2)%3;else if(e.key==KEY_RIGHT)axis=(axis+1)%3;
         else if(e.key==KEY_UP||e.key==KEY_ADD)xyz[axis]+=app.volume_radius*(e.shift?.01f:.1f);
         else if(e.key==KEY_DOWN||e.key==KEY_SUB)xyz[axis]-=app.volume_radius*(e.shift?.01f:.1f);
         else if(e.key==KEY_F1){for(int j=0;j<SURFACE_COUNT;j++){slot=(slot+1)%SURFACE_COUNT;if(app.surface[slot].active)break;}}
-        else if(e.key==KEY_EXE){
-            char temp[EXPR_MAX],error[90];snprintf(temp,sizeof temp,"%.7g",(double)xyz[axis]);
-            if(editor(temp,"PROBE COORDINATE",0)&&compile_formula(temp,&scratch_program,error,sizeof error)){
-                EvalVars zero={0};float value2=expr_eval_real(&scratch_program,&zero);
-                if(isfinite(value2)&&fabsf(value2)<=1e6f)xyz[axis]=value2;
-            }
+        else if(e.key==KEY_EXE||numeric_entry(e)!=ENTRY_NONE||e.key==KEY_F5){
+            float value2;EquationEntry entry=numeric_entry(e);
+            if(e.key==KEY_F5&&entry==ENTRY_NONE)entry=ENTRY_EDIT;
+            if(numeric_value(xyz[axis],"PROBE COORDINATE",e,entry,&value2) &&
+               isfinite(value2)&&fabsf(value2)<=1e6f)xyz[axis]=value2;
         }
     }
     memcpy(gint_vram,backup,bytes);free(backup);
 }
-static int voxel_needed(void)
+/* A cached XY projection of TWO surfaces; cursor Z is always searched afresh. */
+#define MAP_X0 7
+#define MAP_Y0 PLOT_Y0
+#define MAP_X1 (MAP_X0+IMAP_SIDE-1)
+#define MAP_Y1 (MAP_Y0+IMAP_SIDE-1)
+static int map_px(IMapView const *v,float x)
 {
-    if(!app.render3_mode)return 1;
-    for(int i=0;i<SURFACE_COUNT;i++)if(app.surface[i].active && programs[i].relation>=REL_LT)return 1;
-    return 0;
+    if(x<v->center_x-v->radius)return MAP_X0-1;
+    if(x>v->center_x+v->radius)return MAP_X1+1;
+    return MAP_X0+(int)lroundf((x-v->center_x+v->radius)*(IMAP_SIDE-1)/(2*v->radius));
 }
-static void present3d(Camera const *cam,uint16_t const *layer,int ready,int slow,int fast,int empty,int previewing)
+static int map_py(IMapView const *v,float y)
 {
-    char const *mode=previewing?(slow?"PREVIEW | SLOW | PLOT":fast?"PREVIEW | FAST | PLOT":"PREVIEW | PLOT: FINAL"):
+    if(y>v->center_y+v->radius)return MAP_Y0-1;
+    if(y<v->center_y-v->radius)return MAP_Y1+1;
+    return MAP_Y1-(int)lroundf((y-v->center_y+v->radius)*(IMAP_SIDE-1)/(2*v->radius));
+}
+static void map_present(IMapView const *v,IMapPixel const *map,IMapRoots const *roots,
+                        IMapPixelHits const *hits,int pixel_mode,float x,float y,int selected,
+                        IMapPoint const *nearest,int has_near,IMapStats const *st)
+{
+    dclear(C_WHITE);header("3D CROSSINGS","XY PROJECTION");
+    drect_border(MAP_X0,MAP_Y0,MAP_X1,MAP_Y1,C_WHITE,1,C_BLACK);
+    int ox=map_px(v,0),oy=map_py(v,0);
+    if(ox>MAP_X0&&ox<MAP_X1)dline(ox,MAP_Y0+1,ox,MAP_Y1-1,C_LIGHT);
+    if(oy>MAP_Y0&&oy<MAP_Y1)dline(MAP_X0+1,oy,MAP_X1-1,oy,C_LIGHT);
+    for(int j=0;j<IMAP_SIDE;j++)for(int i=0;i<IMAP_SIDE;i++)
+        if(map[(size_t)j*IMAP_SIDE+i].z!=INT16_MIN)
+            gint_vram[(size_t)(MAP_Y0+j)*DWIDTH+MAP_X0+i]=C_BLACK;
+    dprint(MAP_X0+3,MAP_Y0+2,INK,"Y %.3g",(double)(v->center_y+v->radius));
+    dprint(MAP_X0+3,MAP_Y1-23,INK,"Y %.3g",(double)(v->center_y-v->radius));
+    dprint(MAP_X0+3,MAP_Y1-12,INK,"X %.3g",(double)(v->center_x-v->radius));
+    char xmax[24];snprintf(xmax,sizeof xmax,"X %.3g",(double)(v->center_x+v->radius));
+    int label_width=0;dsize(xmax,NULL,&label_width,NULL);
+    dtext(MAXF(MAP_X0+3,MAP_X1-label_width-3),MAP_Y1-12,INK,xmax);
+    int found=pixel_mode?hits->count:(roots->count||roots->interval);
+    if(has_near&&!found){
+        int nx=map_px(v,nearest->x),ny=map_py(v,nearest->y);
+        drect_border(MAXF(MAP_X0,nx-2),MAXF(MAP_Y0,ny-2),MINF(MAP_X1,nx+2),MINF(MAP_Y1,ny+2),C_WHITE,1,C_BLACK);
+    }
+    int cx=map_px(v,x),cy=map_py(v,y);
+    if(cx>=MAP_X0&&cx<=MAP_X1&&cy>=MAP_Y0&&cy<=MAP_Y1){
+        dline(MAXF(MAP_X0,cx-4),cy,MINF(MAP_X1,cx+4),cy,C_BLACK);
+        dline(cx,MAXF(MAP_Y0,cy-4),cx,MINF(MAP_Y1,cy+4),C_BLACK);
+    }
+    dline(193,21,193,198,C_LIGHT);
+    dtext(201,25,INK,pixel_mode?"PIXEL CURSOR":"EXACT INPUT XY");
+    dprint(201,43,INK,"X  %.6g",(double)x);dprint(201,59,INK,"Y  %.6g",(double)y);
+    if(pixel_mode&&hits->count){
+        IMapPoint const *p=&hits->point[selected];
+        dtext(201,80,INK,"IN PIXEL: FOUND ~");
+        dprint(201,98,INK,"X %.7g",(double)p->x);
+        dprint(201,114,INK,"Y %.7g",(double)p->y);
+        dprint(201,130,INK,"Z %.7g",(double)p->z);
+        dprint(201,148,MUTED,"%d/%d%s  F3: NEXT",selected+1,hits->count,hits->overflow?"+":"");
+    }else if(!pixel_mode&&roots->interval){
+        dtext(201,80,INK,"MANY Z? (SAMPLED)");dtext(201,99,MUTED,"Not isolated; numerical.");
+    }else if(!pixel_mode&&roots->count){
+        dtext(201,80,INK,"AT XY: FOUND ~");
+        dprint(201,98,INK,"Z  %.7g",(double)roots->z[selected]);
+        dprint(201,116,INK,"%d / %d%s",selected+1,roots->count,roots->overflow?"+":"");
+        dtext(201,134,MUTED,"F3: NEXT Z");
+    }else{
+        int mapped=cx>=MAP_X0&&cx<=MAP_X1&&cy>=MAP_Y0&&cy<=MAP_Y1&&
+            map[(size_t)(cy-MAP_Y0)*IMAP_SIDE+(cx-MAP_X0)].z!=INT16_MIN;
+        dtext(201,80,INK,pixel_mode?(mapped?"PIXEL: UNVERIFIED":"PIXEL: NOT FOUND"):
+                                        "AT XY: NOT FOUND");
+        if(has_near){
+            dtext(201,99,INK,"NEAREST MAPPED ~");
+            dprint(201,116,INK,"X %.5g  Y %.5g",(double)nearest->x,(double)nearest->y);
+            dprint(201,133,INK,"Z %.6g",(double)nearest->z);
+            dtext(201,150,MUTED,"F4: MOVE TO NEAR");
+        }else dtext(201,99,MUTED,"NO MAPPED POINT");
+    }
+    if(cx<MAP_X0||cx>MAP_X1||cy<MAP_Y0||cy>MAP_Y1)dtext(201,168,MUTED,"XY OUTSIDE MAP");
+    else dtext(201,168,MUTED,"ARROWS MOVE  +/- ZOOM");
+    dprint(201,184,MUTED,"Z %.4g .. %.4g%s",(double)v->zmin,(double)v->zmax,st->low_memory?" *":"");
+    footer("ZOOM","INPUT","NEXT","NEAR","RESET","BACK");dupdate();
+}
+static void map_center_pixel(IMapView const *v,int ix,int iy,float *x,float *y)
+{
+    ix=MAXF(0,MINF(IMAP_SIDE-1,ix));iy=MAXF(0,MINF(IMAP_SIDE-1,iy));
+    float step=2*v->radius/(IMAP_SIDE-1);
+    *x=v->center_x-v->radius+ix*step;*y=v->center_y+v->radius-iy*step;
+}
+static int map_auto_view(IMapView *v)
+{
+    return imap_auto_view_bounds(v,-app.volume_radius-app.map_extend_down,
+                                 app.volume_radius+app.map_extend_up);
+}
+static void intersection_screen(void)
+{
+    RaySurface surface[2];Program const *height[2]={NULL,NULL};int count=0;
+    for(int i=0;i<SURFACE_COUNT;i++)if(app.surface[i].active){
+        if(programs[i].relation>=REL_LT){message("CROSSINGS","Use two equalities, not inequalities.");return;}
+        surface[count]=(RaySurface){ray_zero_valid[i]?&ray_zero_programs[i]:&programs[i],i};
+        height[count]=explicit_valid[i]?&explicit_programs[i]:NULL;count++;
+    }
+    if(count!=2){message("CROSSINGS","Turn on two 3D equations first.");return;}
+    IMapPixel *map=malloc((size_t)IMAP_SIDE*IMAP_SIDE*sizeof *map);
+    if(!map){message("MAP MEMORY","Not enough memory for the XY map.");return;}
+    IMapView view={.radius=app.volume_radius};
+    if(!map_auto_view(&view)){free(map);message("MAP ERROR","Z range needs too many pixel slices.");return;}
+    IMapStats stats={0};IMapRoots roots={0};IMapPixelHits hits={0};IMapPoint nearest={0};
+    float x=0,y=0;int selected=0,dirty=1,search=1,has_near=0,pixel_mode=1;
+    for(;;){
+        if(dirty){
+            Progress pg={0};EvalVars vars=base_vars();calculation_begin();
+            int rc=imap_build_auto(surface,&vars,&view,height,map,progress,&pg,&stats);calculation_end();
+            if(pg.menu){gint_osmenu();break;}
+            if(pg.cancel||rc==0)break;
+            if(rc<0){message("MAP ERROR","Not enough memory or invalid range.");break;}
+            dirty=0;search=1;
+        }
+        if(search){
+            Progress pg={0};EvalVars vars=base_vars();int rc=1;
+            memset(&roots,0,sizeof roots);memset(&hits,0,sizeof hits);
+            int ix=map_px(&view,x)-MAP_X0,iy=map_py(&view,y)-MAP_Y0;
+            calculation_begin();
+            if(pixel_mode&&ix>=0&&ix<IMAP_SIDE&&iy>=0&&iy<IMAP_SIDE)
+                rc=imap_pixel_search(surface,&vars,&view,ix,iy,map,progress,&pg,&hits);
+            else if(!pixel_mode)rc=imap_search(surface,&vars,&view,x,y,progress,&pg,&roots);
+            calculation_end();
+            if(pg.menu){gint_osmenu();break;}
+            if(pg.cancel||rc==0)break;
+            if(rc<0){message("SEARCH ERROR","Invalid XY or Z range.");break;}
+            selected=0;has_near=imap_nearest(map,&view,x,y,&nearest);search=0;
+        }
+        map_present(&view,map,&roots,&hits,pixel_mode,x,y,selected,&nearest,has_near,&stats);
+        key_event_t e=input_key();
+        if(e.key==KEY_EXIT||e.key==KEY_F6)break;
+        if(e.key==KEY_LEFT||e.key==KEY_RIGHT||e.key==KEY_UP||e.key==KEY_DOWN){
+            int step=e.shift?1:5,ix=map_px(&view,x)-MAP_X0,iy=map_py(&view,y)-MAP_Y0;
+            ix=MAXF(0,MINF(IMAP_SIDE-1,ix));iy=MAXF(0,MINF(IMAP_SIDE-1,iy));
+            if(e.key==KEY_LEFT)ix-=step;else if(e.key==KEY_RIGHT)ix+=step;
+            else if(e.key==KEY_UP)iy-=step;else iy+=step;
+            map_center_pixel(&view,ix,iy,&x,&y);pixel_mode=1;search=1;
+        }else if(e.key==KEY_F2||e.key==KEY_VARS){
+            (void)point_editor("ENTER XY FOR Z SEARCH",&x,&y,NULL);
+            pixel_mode=0;search=1;
+        }else if(e.key==KEY_F3){
+            int n=pixel_mode?hits.count:roots.count;if(n)selected=(selected+1)%n;
+        }else if(e.key==KEY_F4&&has_near){
+            int ix=map_px(&view,nearest.x)-MAP_X0,iy=map_py(&view,nearest.y)-MAP_Y0;
+            map_center_pixel(&view,ix,iy,&x,&y);pixel_mode=1;search=1;
+        }else if(e.key==KEY_F1||e.key==KEY_ADD||e.key==KEY_SUB){
+            float factor=(e.key==KEY_SUB||(e.key==KEY_F1&&e.shift))?2:.5f;
+            float r=MAXF(.001f,MINF(1e4f,view.radius*factor));
+            if(r!=view.radius){
+                IMapView next=view;next.radius=r;next.center_x=x;next.center_y=y;
+                if(!map_auto_view(&next))message("MAP ZOOM","Too many pixel slices. Zoom out.");
+                else {view=next;pixel_mode=1;dirty=1;}
+            }
+        }else if(e.key==KEY_F5){
+            view.center_x=view.center_y=0;view.radius=app.volume_radius;x=y=0;
+            if(!map_auto_view(&view)){message("MAP ERROR","Z range needs too many pixel slices.");break;}
+            pixel_mode=1;dirty=1;
+        }else if(e.key==KEY_OPTN){
+            settings();
+            if(!map_auto_view(&view)){
+                view.center_x=view.center_y=0;view.radius=app.volume_radius;x=y=0;pixel_mode=1;
+                if(!map_auto_view(&view)){message("MAP ERROR","Z range needs too many pixel slices.");break;}
+            }
+            dirty=1;
+        }
+    }
+    free(map);
+}
+
+static void present3d(Camera const *cam,uint16_t const *layer,int ready,int slow,int fast,int empty,int previewing,int drawn_step,int drawn_progress)
+{
+    char const *mode=previewing==3?"PREVIEW UNAVAILABLE | PLOT":
+        previewing==2?"REFINING | MOVE: STOP":previewing?(slow?"PREVIEW | SLOW | AUTO":fast?"PREVIEW | FAST | AUTO":"PREVIEW | AUTO REFINE"):
         slow?"ARROWS: TURN  |  SLOW":fast?"ARROWS: TURN  |  FAST":"ARROWS: TURN";
     char quality[12];
-    if(voxel_needed())snprintf(quality,sizeof quality,"V%d%s",app.voxel_div,app.render3_mode?"*":"");
-    else snprintf(quality,sizeof quality,"Q%d",state_ray_quality(&app));
+    if(previewing==2&&drawn_step==1&&drawn_progress>=0)
+        snprintf(quality,sizeof quality,"R%d/1 %d%%",app.fast_ray_q,drawn_progress>100?100:drawn_progress);
+    else if(previewing&&previewing!=3)snprintf(quality,sizeof quality,"R%d/P%d",app.fast_ray_q,drawn_step);
+    else snprintf(quality,sizeof quality,"R%d/1",app.fast_ray_q);
     dclear(C_WHITE);header("3D GRAPH",mode);
     if(app.axes && !app.axes_front)render3_axes(cam);
-    if(ready)layer_blit(layer);
+    if(ready){
+        if(app.axes && !app.axes_front)layer_blit(layer);
+        else for(int y=0;y<PLOT_H;y++)memcpy(gint_vram+(size_t)(PLOT_Y0+y)*DWIDTH+PLOT_X0,
+                                              layer+(size_t)y*PLOT_W,(size_t)PLOT_W*sizeof *layer);
+    }
     if(app.axes && app.axes_front)render3_axes(cam);
     drect(7,20,390,33,C_WHITE);
     dprint(9,22,MUTED,"Eye %.3g, %.3g, %.3g  |  clip %.3g  |  %s",
         (double)app.eye_x,(double)app.eye_y,(double)app.eye_z,(double)app.volume_radius,quality);
-    if(ready && empty){drect(7,174,310,195,C_WHITE);dtext(9,178,WARNING,"No visible voxels / surface in clip cube.");}
+    if(ready && empty){
+        drect(7,174,390,195,C_WHITE);
+        if(previewing==2)
+            dtext(9,178,WARNING,"No sampled hit at this step; refining.");
+        else if(previewing&&previewing!=3&&drawn_step>1)
+            dtext(9,178,WARNING,"No sampled hit; auto refining on stop.");
+        else dtext(9,178,WARNING,"No visible surface / volume in clip cube.");
+    }
     if(!ready){
         drect(7,173,390,198,C_WHITE);
         dtext(9,175,ACCENT,"8/5: front/back  4/6: side  1/0: up/down");
-        dtext(9,187,MUTED,"ALPHA slow  SHIFT fast  |  PLOT/EXE draws");
+        dtext(9,187,MUTED,"2: XY map  |  Auto draws when still");
     }
-    footer("EQS","RESET",app.axes?"AX ON":"AX OFF",quality,app.axes_front?"FRONT":"BACK","PLOT");dupdate();
+    footer("EQS","RESET",app.axes?"AX ON":"AX OFF",quality,app.axes_front?"FRONT":"BACK","AUTO");dupdate();
 }
-static int reproject3d(Preview3D *cloud,uint16_t *layer,Camera const *cam)
+/* Each stage operates on the same layer and only samples previously unknown
+   screen positions. The existing candidate/occupancy grid stays reusable. */
+static int render3d_stage(Camera const *cam,int step,int final_stream,RayGridCache **raygrid,
+                          ScreenRefine *refine,uint16_t *layer,int *empty,Progress *pg,int interruptible)
 {
-    if(!cloud->point||!layer)return 0;
-    dclear(C_WHITE);
-    if(preview3d_draw(cloud,cam)!=1)return 0;
-    layer_capture(layer);return 1;
+    if(!*raygrid)*raygrid=calloc(1,sizeof **raygrid); /* optional cache */
+    Volume vol={.x=0,.y=0,.z=0,.radius=app.volume_radius,
+        .div=app.fast_ray_q,.period_x=app.period_x};
+    RaySurface surfaces[SURFACE_COUNT];
+    RayRenderOptions ro={.grid=*raygrid,.screen_step=(uint8_t)step,.final_stream=(uint8_t)final_stream,.layer=layer,.refine=refine};int n=0;
+    for(int i=0;i<SURFACE_COUNT;i++)if(app.surface[i].active){
+        surfaces[n]=(RaySurface){ray_zero_valid[i]?&ray_zero_programs[i]:&programs[i],i};
+        if(explicit_valid[i])ro.height[n]=&explicit_programs[i];
+        n++;
+    }
+    EvalVars vars=base_vars();
+    pg->track_shift=keydown(KEY_SHIFT);pg->track_alpha=keydown(KEY_ALPHA);
+    ProgressFn callback=interruptible==1?progressive_progress:interruptible==2?preview_progress:progress;
+    calculation_begin();
+    RayStats st={0};int rc=ray3d_render_ex(surfaces,n,&vars,&vol,cam,&ro,callback,pg,&st);
+    /* The streamed step skips old even/even pixels. A previous hit remains. */
+    *empty=final_stream?(*empty&&st.hits==0):(st.hits==0);
+    calculation_end();return rc;
+}
+static void clear_3d_grid(RayGridCache **r)
+{
+    ray_grid_cache_clear(*r);free(*r);*r=NULL;
+}
+/* 1: complete coarse frame, 0: EXIT, -1: allocation/error, -2: MENU. */
+static int preview3d_frame(uint16_t **layer,Camera const *cam,RayGridCache **r,
+                           ScreenRefine *refine,int *empty,int slow_lock,int alpha_down)
+{
+    if(!*layer)*layer=layer_create();
+    if(!*layer)return -1;
+    Camera current=*cam;
+    for(;;){
+        if(!refine_begin(refine,app.preview_ray_step))return -1;
+        Progress pg={0};int rc=render3d_stage(&current,app.preview_ray_step,0,r,refine,*layer,empty,&pg,2);
+        if(pg.menu)return -2;
+        if(pg.cancel)return 0;
+        if(pg.motion){apply_progress_motion(&pg,slow_lock,alpha_down);current=camera3d();continue;}
+        if(rc==0)return 0;
+        return rc<0?-1:1;
+    }
 }
 static void plot3d(void)
 {
     if(!compile_active(1))return;
-    uint16_t *layer=NULL; /* allocated after the renderer frees its depth buffer */
-    RayGridCache *grid=NULL;Preview3D cloud={0};
-    int ready=0,render=0,previewing=0,empty=0,slow_lock=0,alpha_chord=0;
+    uint16_t *layer=NULL;RayGridCache *grid=NULL;ScreenRefine refine={0};
+    int ready=0,render=0,previewing=0,empty=0,slow_lock=0,alpha_chord=0,hold_parked=0,drawn_step=0,drawn_progress=-1;
+    int pending=0,pending_shift=0,pending_alpha=0;key_event_t pending_event={0};
     int alpha_down=keydown(KEY_ALPHA);
     for(;;){
         Camera cam=camera3d();
         if(render){
-            free(layer);layer=NULL;
-            calculation_begin();dclear(C_WHITE);
-            int use_voxels=voxel_needed();
-            if(use_voxels){ray_grid_cache_clear(grid);free(grid);grid=NULL;}
-            else if(!grid)grid=calloc(1,sizeof *grid); /* optional */
-            Volume vol={.x=0,.y=0,.z=0,.radius=app.volume_radius,
-                .div=use_voxels?app.voxel_div:state_ray_quality(&app),.period_x=app.period_x};
-            RaySurface surfaces[SURFACE_COUNT];RayRenderOptions opt={.grid=grid};int n=0;
-            for(int i=0;i<SURFACE_COUNT;i++)if(app.surface[i].active){
-                surfaces[n]=(RaySurface){ray_zero_valid[i]?&ray_zero_programs[i]:&programs[i],i};
-                if(!use_voxels&&explicit_valid[i])opt.height[n]=&explicit_programs[i];
-                n++;
+            int interrupt=0,broken=0;
+            if(!ready||!refine.seed_done){
+                if(!layer)layer=layer_create();
+                if(!layer){clear_3d_grid(&grid);layer=layer_create();}
+                int seed=app.fast_ray_step;
+                if(!layer||!refine_begin(&refine,seed)){message("3D MEMORY","Not enough memory for progressive plot.");break;}
             }
-            /* Preserve coarse points only when a RAY grid may be reused.
-               The renderer resets them itself if its cache does not match. */
-            (void)preview3d_recapture(&cloud,&vol,&cam,!use_voxels&&grid&&grid->valid);
-            opt.preview=cloud.point?&cloud:NULL;
-            EvalVars vars=base_vars();Progress pg={0};int rc;
-            if(use_voxels){
-                VoxelStats stats;rc=voxel3d_render_ex(surfaces,n,&vars,&vol,&cam,opt.preview,progress,&pg,&stats);
-                if(rc==-2&&cloud.point){
-                    preview3d_free(&cloud);dclear(C_WHITE);
-                    rc=voxel3d_render_ex(surfaces,n,&vars,&vol,&cam,NULL,progress,&pg,&stats);
+            int step=refine.seed_done?refine_next(refine.last_step):refine.seed_step;
+            while(step){
+                /* Stream the heavy 2 -> 1 Ray transition by completed rows.
+                   The old even/even lattice is skipped without retracing. */
+                int stream=step==1&&refine.seed_done&&refine.last_step==2;
+                Progress pg={0};
+                if(stream){
+                    pg.live_cam=&cam;pg.live_layer=layer;pg.live_slow=slow_lock||alpha_down;
+                    present3d(&cam,layer,1,pg.live_slow,0,0,2,1,0);
                 }
-                empty=stats.pixels==0;
-            }else{
-                RayStats stats;rc=ray3d_render_ex(surfaces,n,&vars,&vol,&cam,&opt,progress,&pg,&stats);
-                if(rc==-2&&cloud.point){
-                    preview3d_free(&cloud);ray_grid_cache_clear(grid);free(grid);grid=NULL;
-                    opt.grid=NULL;opt.preview=NULL;dclear(C_WHITE);
-                    rc=ray3d_render_ex(surfaces,n,&vars,&vol,&cam,&opt,progress,&pg,&stats);
+                int was_empty=empty;
+                int rc=render3d_stage(&cam,step,stream,&grid,&refine,layer,&empty,&pg,1);
+                if(pg.menu){gint_osmenu();broken=1;break;}
+                if(pg.cancel){broken=1;break;}
+                if(pg.command){
+                    pending=1;pending_event=pg.command_event;
+                    pending_shift=pg.command_shift;pending_alpha=pg.command_alpha;
+                    /* Incomplete seed has no valid image; otherwise retain the
+                       last level and restart its unfinished successor later. */
+                    if(!ready){refine_free(&refine);previewing=0;}
+                    else {previewing=1;empty=was_empty&&empty;}
+                    drawn_progress=-1;interrupt=1;break;
                 }
-                empty=stats.hits==0;
+                if(pg.motion){
+                    apply_progress_motion(&pg,slow_lock,alpha_down);
+                    Camera next=camera3d();int pr=preview3d_frame(&layer,&next,&grid,&refine,&empty,slow_lock,alpha_down);
+                    if(pr==-2){gint_osmenu();broken=1;break;}
+                    if(pr==0){broken=1;break;}
+                    ready=pr>0;previewing=pr<0?3:1;drawn_progress=-1;
+                    if(pr>0)drawn_step=app.preview_ray_step;
+                    interrupt=1;break;
+                }
+                if(rc!=1){message("3D ERROR","Not enough memory or invalid view.");broken=1;break;}
+                ready=1;drawn_step=step;drawn_progress=-1;previewing=step>1?2:0;
+                /* Each complete refinement level becomes visible. */
+                present3d(&cam,layer,1,slow_lock||alpha_down,0,empty,previewing,drawn_step,drawn_progress);
+                step=refine_next(step);
             }
-            calculation_end();
-            if(pg.menu){gint_osmenu();break;}
-            if(pg.cancel||rc==0)break;
-            if(rc<0){message("3D ERROR","Not enough memory or invalid view.");break;}
-            layer=layer_create();
-            if(!layer&&cloud.aux){
-                /* First discard only the optional coarse samples. The more
-                   precise visible points can still provide a preview. */
-                free(cloud.aux);cloud.aux=NULL;cloud.aux_count=cloud.aux_seen=0;
-                layer=layer_create();
-            }
-            if(!layer){
-                /* Preserve the final graph if optional cache storage made the
-                   layer allocation fail. Preview can simply be unavailable. */
-                preview3d_free(&cloud);ray_grid_cache_clear(grid);free(grid);grid=NULL;
-                layer=layer_create();
-            }
-            if(!layer){message("3D MEMORY","Not enough memory for the plot layer.");break;}
-            layer_capture(layer);ready=1;render=0;previewing=0;
+            if(broken)break;
+            render=0;
+            if(interrupt)continue;
+            previewing=0; /* last stage is the full one-pixel frame */
         }
 #ifdef GL_HOST
         int hud_slow=slow_lock||alpha_down,hud_fast=0;
 #else
         int hud_slow=slow_lock||keydown(KEY_ALPHA),hud_fast=keydown(KEY_SHIFT);
 #endif
-        present3d(&cam,layer,ready,hud_slow,hud_fast,empty,previewing);
-        key_event_t e=navigation_wait();
+        present3d(&cam,layer,ready,hud_slow,hud_fast,empty,previewing,drawn_step,drawn_progress);
+        int idle=0,needs_auto=previewing!=3&&(!ready||previewing==1);
+        int from_pending=pending;key_event_t e;
+        if(pending){e=pending_event;pending=0;}
+        else e=hold_parked?navigation_wait_change():
+            needs_auto?navigation_wait_idle(&idle):navigation_wait();
+        hold_parked=0;
+        if(idle && !navigation_held(e)){render=1;continue;}
         if(e.key==KEY_ALPHA && e.type==KEYEV_DOWN){alpha_down=1;alpha_chord=navigation_held(e)!=0;continue;}
         if(e.key==KEY_ALPHA && e.type==KEYEV_UP){
             if(alpha_down && !alpha_chord)slow_lock=!slow_lock;
             alpha_down=0;alpha_chord=0;continue;
         }
 #ifdef GL_HOST
-        int alpha_held=alpha_down||e.held_alpha;
-        int shift_held=e.shift||e.held_shift;
+        int alpha_held=alpha_down||e.held_alpha||(from_pending&&pending_alpha);
+        int shift_held=e.shift||e.held_shift||(from_pending&&pending_shift);
 #else
-        int alpha_held=keydown(KEY_ALPHA);
-        int shift_held=keydown(KEY_SHIFT);
+        int alpha_held=keydown(KEY_ALPHA)||(from_pending&&pending_alpha);
+        int shift_held=keydown(KEY_SHIFT)||(from_pending&&pending_shift);
 #endif
         uint32_t held=navigation_held(e);
         if(alpha_held && e.type==KEYEV_DOWN && e.key!=KEY_ALPHA)alpha_chord=1;
         if((e.type==KEYEV_DOWN && navigation_key(e.key)) || e.type==KEYEV_NONE || e.type==KEYEV_HOLD){
-            if(held && navigation_step(&app,held,slow_lock||alpha_held,shift_held)){
-                Camera next=camera3d();
-                previewing=reproject3d(&cloud,layer,&next);ready=previewing;
+            if(held){
+                if(navigation_step(&app,held,slow_lock||alpha_held,shift_held)){
+                    Camera next=camera3d();int pr=preview3d_frame(&layer,&next,&grid,&refine,&empty,slow_lock,alpha_down);
+                    if(pr==-2){gint_osmenu();break;}
+                    if(pr==0)break;
+                    previewing=pr<0?3:1;ready=pr>0;drawn_progress=-1;
+                    if(pr>0)drawn_step=app.preview_ray_step;
+                }else hold_parked=1;
             }
             if(held && alpha_held)alpha_chord=1;
             continue;
@@ -1359,38 +1862,34 @@ static void plot3d(void)
         int changed=0,view_only=0;
         if(e.key==KEY_MENU){gint_osmenu();}
         else if(e.key==KEY_F2){app.camera_yaw=.75f;app.camera_pitch=.55f;app.camera_zoom=1;state_default_eye(&app);changed=view_only=1;}
+        else if(e.key==KEY_2 || (e.key==KEY_F3 && shift_held)){
+            snapshot_settings(&settings_before,&app);clear_3d_grid(&grid);intersection_screen();
+            changed=changed_3d(&app,&settings_before);
+        }
         else if(e.key==KEY_F3)app.axes^=1;
         else if(e.key==KEY_F4){
-            if(voxel_needed()){
-                int n=app.voxel_div;
-                app.voxel_div=(uint8_t)(n<12?12:n<20?20:n<32?32:n<48?48:n<64?64:6);
-            }else {
-                int q=state_ray_quality(&app);
-                (void)state_set_ray_quality(&app,q<12?12:q<20?20:q<32?32:q<48?48:4);
-            }
+            int q=app.fast_ray_q;app.fast_ray_q=(uint8_t)(q<12?12:q<20?20:q<32?32:q<48?48:4);
             changed=1;
         }
         else if(e.key==KEY_F5)app.axes_front^=1;
-        else if(e.key==KEY_OPTN){
-            snapshot_settings(&settings_before,&app);settings();
-            changed=changed_common(&app,&settings_before)||app.period_x!=settings_before.period_x||
-                app.volume_x!=settings_before.volume_x||app.volume_y!=settings_before.volume_y||
-                app.volume_z!=settings_before.volume_z||app.volume_radius!=settings_before.volume_radius||
-                app.render3_mode!=settings_before.render3_mode||app.voxel_div!=settings_before.voxel_div||
-                state_ray_quality(&app)!=settings_before.ray_quality;
-        }
+        else if(e.key==KEY_OPTN){snapshot_settings(&settings_before,&app);settings();changed=changed_3d(&app,&settings_before);}
         else if(e.key==KEY_F6||e.key==KEY_EXE){if(!ready||previewing)render=1;}
         else if(e.key==KEY_VARS){
-            if(ready)probe3d();else {
-                changed=point_editor("3D OBSERVER POSITION",&app.eye_x,&app.eye_y,&app.eye_z);view_only=1;
-            }
+            /* Auto rendering can finish before VARS is pressed. SHIFT+VARS
+               keeps exact observer coordinates accessible after that point. */
+            if(ready&&!shift_held)probe3d();
+            else {changed=point_editor("3D OBSERVER POSITION",&app.eye_x,&app.eye_y,&app.eye_z);view_only=1;}
         }
         if(changed){
-            if(view_only){Camera next=camera3d();previewing=reproject3d(&cloud,layer,&next);ready=previewing;}
-            else {preview3d_free(&cloud);ray_grid_cache_clear(grid);ready=previewing=0;}
+            if(view_only&&ready){
+                Camera next=camera3d();int pr=preview3d_frame(&layer,&next,&grid,&refine,&empty,slow_lock,alpha_down);
+                if(pr==-2){gint_osmenu();break;}
+                if(pr==0)break;
+                previewing=pr<0?3:1;ready=pr>0;drawn_progress=-1;if(pr>0)drawn_step=app.preview_ray_step;
+            }else if(!view_only){clear_3d_grid(&grid);refine_free(&refine);ready=previewing=0;drawn_progress=-1;}
         }
     }
-    free(layer);preview3d_free(&cloud);ray_grid_cache_clear(grid);free(grid);
+    free(layer);refine_free(&refine);clear_3d_grid(&grid);
 }
 
 static void fractal_block(int x,int y,int w,int h,int iteration,void *context)
@@ -1555,11 +2054,19 @@ static void equations(int is3)
             struct dwindow old=dwindow_set((struct dwindow){72,y+3,DWIDTH-9,y+31});
             dtext(73,y+7,INK,eq[i].formula);dwindow_set(old);
         }
-        dtext(10,145,MUTED,"EXE: edit   Letter/digit/DEL: new formula");
-        dtext(10,163,MUTED,"F3 / OPTN: settings, clipping cube, period.");draw_notice();
+        dtext(10,145,MUTED,"EXE: edit  |  Letter/digit/DEL: new");
+        dtext(10,163,MUTED,"Math keys edit  |  F3 / OPTN: settings");draw_notice();
         footer("EDIT","ON/OFF","PARAM","EXAMPL","SAVE","PLOT");dupdate();key_event_t e=input_key();
         if(e.key==KEY_EXIT)return;
-        if(e.key==KEY_UP){sel=(sel+count-1)%count;clear_notice();}
+        /* SHIFT+UP/DOWN and SHIFT+F5 are editor actions. The corresponding
+           unmodified keys remain list navigation and SAVE respectively. */
+        EquationEntry entry=equation_entry(e);
+        if((e.key==KEY_UP||e.key==KEY_DOWN||e.key==KEY_F5) && e.shift && entry==ENTRY_EDIT){
+            if(editor_seed(eq[sel].formula,is3?"EDIT 3D EQUATION":"EDIT 2D EQUATION",is3?2:1,e,1)){
+                eq[sel].active=1;clear_notice();
+            }
+        }
+        else if(e.key==KEY_UP){sel=(sel+count-1)%count;clear_notice();}
         else if(e.key==KEY_DOWN){sel=(sel+1)%count;clear_notice();}
         else if(e.key==KEY_F1||e.key==KEY_EXE){if(editor(eq[sel].formula,is3?"EDIT 3D EQUATION":"EDIT 2D EQUATION",is3?2:1)){eq[sel].active=1;clear_notice();}}
         else if(e.key==KEY_F2){eq[sel].active^=1;clear_notice();}
@@ -1567,10 +2074,15 @@ static void equations(int is3)
         else if(e.key==KEY_F4){examples(&eq[sel],is3);clear_notice();}
         else if(e.key==KEY_F5)save_now();
         else if(e.key==KEY_F6){if(is3)plot3d();else plot2d();}
-        else if(begins_new_formula(e)) {
+        else if(entry==ENTRY_NEW){
             char fresh[EXPR_MAX]="";
             if(editor_seed(fresh,is3?"NEW 3D EQUATION":"NEW 2D EQUATION",is3?2:1,e,1)) {
                 strcpy(eq[sel].formula,fresh);eq[sel].active=1;clear_notice();
+            }
+        }
+        else if(entry==ENTRY_EDIT){
+            if(editor_seed(eq[sel].formula,is3?"EDIT 3D EQUATION":"EDIT 2D EQUATION",is3?2:1,e,1)){
+                eq[sel].active=1;clear_notice();
             }
         }
     }
@@ -1594,7 +2106,11 @@ int main(void)
         if(loaded>0)snprintf(notice,sizeof notice,"3D cube reset to origin; F2 resets the view.");
     }
     for(;;){
-        dclear(PALE);header("GRAPH LAB 1.09","CASIO fx-CG50");
+#ifdef GL_DEV
+        dclear(PALE);header("GRAPH LAB 1.20 DEV","CASIO fx-CG50");
+#else
+        dclear(PALE);header("GRAPH LAB 1.20","CASIO fx-CG50");
+#endif
         centered(28,INK,"2D  /  3D  /  CUSTOM FRACTALS");
         drect_border(8,48,DWIDTH-9,176,C_WHITE,1,BORDER);
         dtext(18,58,ACCENT,"F1   2D equations and functions");

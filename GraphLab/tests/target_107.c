@@ -2,7 +2,6 @@
    The arena is a test allocator, not a measurement of free calculator RAM. */
 #include "../src/expr.h"
 #include "../src/ray.h"
-#include "../src/voxel.h"
 #include "../src/trigfast.h"
 #include "../src/fractal.h"
 #include "../src/scroll.h"
@@ -57,11 +56,19 @@ int main(void)
     if(gint_vram[center]==C_WHITE)return 11;
     cam.yaw=.1f;opt.preview=NULL;clear();
     if(ray3d_render_ex(&surface,1,&vars,&vol,&cam,&opt,NULL,NULL,&st)!=1||!st.grid_reused)return 12;
+    opt.screen_step=8;clear();
+    if(ray3d_render_ex(&surface,1,&vars,&vol,&cam,&opt,NULL,NULL,&st)!=1||!st.grid_reused||
+       st.rays!=((PLOT_W+7)/8)*((PLOT_H+7)/8)||st.hits<1)return 28;
+    for(int y=PLOT_Y0;y<=PLOT_Y1;y+=8)for(int x=PLOT_X0;x<=PLOT_X1;x+=8){
+        uint16_t col=gint_vram[y*DWIDTH+x];
+        for(int dy=0;dy<8&&y+dy<=PLOT_Y1;dy++)for(int dx=0;dx<8&&x+dx<=PLOT_X1;dx++)
+            if(gint_vram[(y+dy)*DWIDTH+x+dx]!=col)return 29;
+    }
     preview3d_free(&cloud);ray_grid_cache_clear(&grid);used=0;
     memset(&cloud,0,sizeof cloud);cam.yaw=0;
     if(!compile("x^2+y^2+z^2<=1")||!preview3d_begin(&cloud,&vol,&cam))return 13;
-    surface.program=&pr;VoxelStats vox;clear();
-    if(voxel3d_render_ex(&surface,1,&vars,&vol,&cam,&cloud,NULL,NULL,&vox)!=1||cloud.count<50)return 14;
+    surface.program=&pr;opt=(RayRenderOptions){.preview=&cloud};clear();
+    if(ray3d_render_ex(&surface,1,&vars,&vol,&cam,&opt,NULL,NULL,&st)!=1||cloud.count<50)return 14;
     clear();cam.pitch=.1f;if(preview3d_draw(&cloud,&cam)!=1)return 15;
     preview3d_free(&cloud);used=0;
     /* 1.08: SH libm/LUT agreement outside the guard, incorrect period

@@ -1,12 +1,12 @@
 #!/bin/sh
-# Independent 1.08/1.09 host binaries; no calculator OS emulation.
+# Independent 1.08/1.10 host binaries; no calculator OS emulation.
 set -eu
 cd "$(dirname "$0")/.."
 newroot=$(pwd)
 # This test only needs the bundled 1.08 storage implementation and headers.
 oldroot=${PREVIOUS_ROOT:-"$newroot/tests/fixtures/GraphLab_1.08"}
 test -f "$oldroot/src/storage.c" || { echo 'Set PREVIOUS_ROOT to GraphLab 1.08 sources.' >&2; exit 1; }
-work=$(mktemp -d "${TMPDIR:-/tmp}/gl109-q-cross-XXXXXX")
+work=$(mktemp -d "${TMPDIR:-/tmp}/gl110-q-cross-XXXXXX")
 trap 'rm -rf "$work"' EXIT HUP INT TERM
 cc=${CC:-cc}
 "$cc" -std=c11 -DGL_HOST -Wall -Wextra -Werror -I"$oldroot/src" tests/cross_quality.c "$oldroot/src/storage.c" -lm -o "$work/old"

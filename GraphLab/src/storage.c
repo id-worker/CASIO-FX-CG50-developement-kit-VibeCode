@@ -10,7 +10,7 @@
 #include <unistd.h>
 #include <errno.h>
 #define SAVE_MAGIC 0x474c4142u
-#define SAVE_VERSION 5u
+#define SAVE_VERSION 9u
 
 /* Version 0.90..1.08 stored 160-byte formulas. Do not reinterpret these
    layouts using the new editor limit: they are on-disk wire formats. */
@@ -28,7 +28,7 @@ typedef struct {
 } GraphStateV1;
 typedef struct {GraphStateV1 prefix;float eye_x,eye_y,eye_z,period_x;uint8_t axes_front;} GraphStateV2;
 typedef struct {GraphStateV2 prefix;uint8_t curve_width;} GraphStateV3;
-typedef struct {GraphStateV3 prefix;uint8_t render3_mode,voxel_div,accuracy2,follow_eye;} GraphStateV4;
+typedef struct {GraphStateV3 prefix;uint8_t legacy_render_mode,legacy_grid_div,accuracy2,follow_eye;} GraphStateV4;
 typedef struct {
     uint32_t magic,version,sequence,payload_size,checksum;
     GraphState state;
@@ -41,6 +41,8 @@ _Static_assert(sizeof(GraphStateV2)==1408,"legacy v2 layout changed");
 _Static_assert(sizeof(GraphStateV3)==1412,"legacy v3 layout changed");
 _Static_assert(sizeof(GraphStateV4)==1416,"legacy v4 layout changed");
 _Static_assert(offsetof(SaveRecord,state)==20,"save header layout changed");
+_Static_assert(offsetof(GraphState,fast_ray_step)==6292,"v6 payload layout changed");
+_Static_assert(offsetof(GraphState,preview_ray_step)==6304,"v7 payload layout changed");
 typedef struct {char path[192];SaveRecord rec;int status,generation;} Job;
 /* Separate, slot-bound authentication avoids interpreting arbitrary padding
    from an old v3/v4 save as a custom Q. Old versions simply ignore it. */
@@ -51,14 +53,18 @@ typedef struct {char path[192];QualityRecord rec;int status;} QualityJob;
 static char test_dir[128]="/tmp";
 void storage_set_test_dir(char const *path) {snprintf(test_dir,sizeof test_dir,"%s",path);}
 #endif
-/* v5 has its own two-slot journal, so the old application can still use
-   the unmodified v4 files. New saves are intentionally not back-propagated. */
+/* v9 uses GLAB8. Earlier journals remain untouched; saves are not
+   back-propagated to older add-ins. */
 static void path_for(char *dest,size_t size,int slot,int generation)
 {
-    char const *name=generation==0?(slot?"GLAB4_B.DAT":"GLAB4_A.DAT"):
-                     generation==1?(slot?"GLAB3_B.DAT":"GLAB3_A.DAT"):
-                     generation==2?(slot?"GLAB2_B.DAT":"GLAB2_A.DAT"):
-                     generation==3?(slot?"GLAB1_B.DAT":"GLAB1_A.DAT"):
+    char const *name=generation==0?(slot?"GLAB8_B.DAT":"GLAB8_A.DAT"):
+                     generation==1?(slot?"GLAB7_B.DAT":"GLAB7_A.DAT"):
+                     generation==2?(slot?"GLAB6_B.DAT":"GLAB6_A.DAT"):
+                     generation==3?(slot?"GLAB5_B.DAT":"GLAB5_A.DAT"):
+                     generation==4?(slot?"GLAB4_B.DAT":"GLAB4_A.DAT"):
+                     generation==5?(slot?"GLAB3_B.DAT":"GLAB3_A.DAT"):
+                     generation==6?(slot?"GLAB2_B.DAT":"GLAB2_A.DAT"):
+                     generation==7?(slot?"GLAB1_B.DAT":"GLAB1_A.DAT"):
                                    (slot?"GLABC_B.DAT":"GLABC_A.DAT");
 #ifdef GL_HOST
     snprintf(dest,size,"%s/%s",test_dir,name);
@@ -118,7 +124,10 @@ void state_defaults(GraphState *s)
     s->camera_yaw=.75f;s->camera_pitch=.55f;s->camera_zoom=1;
     s->fractal=(FractalView){-.5f,0,.012f,-.8f,.156f,4,40,4,0};
     s->grid=1;s->detail2=1;s->detail3=1;s->axes=1;s->wire=0;s->axes_front=1;s->curve_width=1;
-    s->render3_mode=0;s->voxel_div=20;s->accuracy2=1;s->follow_eye=0;
+    s->legacy_render_mode=2;s->legacy_grid_div=20;s->accuracy2=1;s->follow_eye=0;
+    s->map_zmin=-3;s->map_zmax=3;s->map_xy_quality=1;s->map_z_quality=1;
+    s->cursor_quality=1;s->preview_quality=1;
+    s->fast_ray_step=32;s->fast_ray_q=8;s->preview_ray_step=32;
     state_default_eye(s);
 }
 static int custom_tag(GraphState const *s)
@@ -160,7 +169,12 @@ int state_validate(GraphState const *s)
     if(!in(s->camera_yaw,-1000,1000)||!in(s->camera_pitch,-1.5f,1.5f)||!in(s->camera_zoom,.2f,4.0f))return 0;
     if(!in(s->eye_x,-1e6f,1e6f)||!in(s->eye_y,-1e6f,1e6f)||!in(s->eye_z,-1e6f,1e6f)||
        !in(s->period_x,0,1e5f)||s->axes_front>1||s->curve_width<1||s->curve_width>5||
-       s->render3_mode>1||s->voxel_div<6||s->voxel_div>64||s->accuracy2>3||s->follow_eye>1)return 0;
+       s->legacy_render_mode>2||s->legacy_grid_div<6||s->legacy_grid_div>64||s->accuracy2>3||s->follow_eye>1||
+       s->fast_ray_step<1||s->fast_ray_step>32||s->preview_ray_step<1||s->preview_ray_step>32||
+       s->fast_ray_q<4||s->fast_ray_q>48||
+       !in(s->map_extend_down,0,1e4f)||!in(s->map_extend_up,0,1e4f)||
+       !in(s->map_zmin,-1e4f,1e4f)||!in(s->map_zmax,-1e4f,1e4f)||s->map_zmax-s->map_zmin<.00001f||
+       s->map_xy_quality>3||s->map_z_quality>3||s->cursor_quality>3||s->preview_quality>2)return 0;
     FractalView const *f=&s->fractal;
     if(!in(f->cx,-1e6f,1e6f)||!in(f->cy,-1e6f,1e6f)||!in(f->units_per_pixel,.000001f,1000)||
        !in(f->julia_re,-1e4f,1e4f)||!in(f->julia_im,-1e4f,1e4f)||!in(f->escape_radius,1,1000)||
@@ -171,6 +185,35 @@ int state_validate(GraphState const *s)
    temporary old state lives on the heap, not gint's limited 16 KiB stack. */
 static int import_old(SaveRecord *r,size_t payload,unsigned version)
 {
+    if(version==8){
+        GraphState *s=&r->state;
+        if(!state_validate(s))return 0;
+        /* Fresh 32-pixel starting frames for the new progressive workflow. */
+        s->fast_ray_step=32;s->preview_ray_step=32;
+        return 1;
+    }
+    if(version==7){
+        GraphState *s=&r->state;
+        if(s->fast_ray_step!=1&&s->fast_ray_step!=2&&s->fast_ray_step!=4&&s->fast_ray_step!=8)return 0;
+        /* The old setting meant point-cloud sampling; do not reinterpret it
+           as a direct renderer spacing, which could unexpectedly be slow. */
+        s->fast_ray_step=32;s->preview_ray_step=32;
+        return state_validate(s);
+    }
+    if(version==6){
+        GraphState *s=&r->state;
+        if(s->legacy_render_mode>1)return 0;
+        s->fast_ray_step=32;s->fast_ray_q=8;s->map_extend_down=s->map_extend_up=0;s->preview_ray_step=32;
+        return state_validate(s);
+    }
+    if(version==5){
+        /* v5 was the same prefix. New journal is written only on save. */
+        GraphState *s=&r->state;if(s->legacy_render_mode>1)return 0;
+        s->map_zmin=-3;s->map_zmax=3;
+        s->map_xy_quality=1;s->map_z_quality=1;s->cursor_quality=1;s->preview_quality=1;
+        s->fast_ray_step=32;s->fast_ray_q=8;s->map_extend_down=s->map_extend_up=0;s->preview_ray_step=32;
+        return state_validate(s);
+    }
     GraphStateV4 *old=calloc(1,sizeof *old);
     if(!old)return 0;
     memcpy(old,&r->state,payload);
@@ -205,10 +248,11 @@ static int import_old(SaveRecord *r,size_t payload,unsigned version)
     }else {dst->period_x=0;dst->axes_front=1;state_default_eye(dst);}
     if(version>=3)dst->curve_width=v3->curve_width;
     if(version>=4){
+        if(old->legacy_render_mode>1){free(old);return 0;}
         /* These three bytes were reserved/padding in v4. They require the
            old GLQ8 sidecar before they can be interpreted as a custom Q. */
         memcpy(dst->reserved_v3,(unsigned char const *)v3+offsetof(GraphStateV3,curve_width)+1,3);
-        dst->render3_mode=old->render3_mode;dst->voxel_div=old->voxel_div;
+        dst->legacy_render_mode=old->legacy_render_mode;dst->legacy_grid_div=old->legacy_grid_div;
         dst->accuracy2=old->accuracy2;dst->follow_eye=old->follow_eye;
     }
     ok=state_validate(dst);free(old);return ok;
@@ -221,7 +265,9 @@ static int read_os(void *arg)
     if(fd<0){j->status=(errno==ENOENT)?0:2;return 0;}
     j->status=2;
     unsigned version=SAVE_VERSION-(unsigned)j->generation;
-    size_t payload=version==5?sizeof(GraphState):version==4?sizeof(GraphStateV4):
+    size_t payload=version>=8?sizeof(GraphState):version==7?offsetof(GraphState,preview_ray_step):
+                   version==6?offsetof(GraphState,fast_ray_step):
+                   version==5?offsetof(GraphState,map_zmin):version==4?sizeof(GraphStateV4):
                    version==3?sizeof(GraphStateV3):version==2?sizeof(GraphStateV2):sizeof(GraphStateV1);
     size_t expected=offsetof(SaveRecord,state)+payload;
     off_t size=lseek(fd,0,SEEK_END);
@@ -283,7 +329,7 @@ int storage_load(GraphState *state)
     inspect(a,0,0);inspect(b,1,0);
     /* Only fall back when both newer files are absent: a damaged/foreign
        new journal must never be silently replaced by a stale one. */
-    for(int generation=1;generation<=4&&a->status==0&&b->status==0;generation++){
+    for(int generation=1;generation<=8&&a->status==0&&b->status==0;generation++){
         inspect(a,0,generation);inspect(b,1,generation);
     }
     Job *best=NULL;
@@ -292,19 +338,21 @@ int storage_load(GraphState *state)
     int result=best?1:(a->status==2||b->status==2?-1:0);
     if(best){
         *state=best->rec.state;
-        int q=custom_tag(state),trusted=best->rec.version==SAVE_VERSION;
+        int q=custom_tag(state),trusted=best->rec.version>=5;
         if(q&&best->rec.version==4){
             QualityJob side;inspect_quality(&side,best==a?0:1);
             trusted=side.status==1&&side.rec.sequence==best->rec.sequence&&
                     side.rec.save_checksum==best->rec.checksum&&side.rec.q==(uint32_t)q;
         }
         if(!trusted)memset(state->reserved_v3,0,sizeof state->reserved_v3);
+        /* Import the old mode 1 Q; the legacy byte is ignored by the 1.20 renderer. */
+        if(state->legacy_render_mode==1){state->fast_ray_q=(uint8_t)state_ray_quality(state);state->legacy_render_mode=2;}
     }
     free(a);free(b);return result;
 }
 int storage_save(GraphState const *state)
 {
-    if(!state_validate(state))return -1;
+    if(!state_validate(state)||state->legacy_render_mode==1)return -1;
     Job *a=malloc(sizeof *a),*b=malloc(sizeof *b);
     if(!a||!b){free(a);free(b);return -1;}
     inspect(a,0,0);inspect(b,1,0);

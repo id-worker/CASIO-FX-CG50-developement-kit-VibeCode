@@ -60,7 +60,7 @@ int main(void)
         assert(diff<250);
         capture(&s,k,shift,1,a);capture(&s,0,0,0,b);assert(different()==0);cases++;
     }
-    char path[256];snprintf(path,sizeof path,"%s/GLAB4_A.DAT",dir);unlink(path);
-    snprintf(path,sizeof path,"%s/GLAB4_B.DAT",dir);unlink(path);rmdir(dir);
+    char path[256];snprintf(path,sizeof path,"%s/GLAB8_A.DAT",dir);unlink(path);
+    snprintf(path,sizeof path,"%s/GLAB8_B.DAT",dir);unlink(path);rmdir(dir);
     printf("2D UI strip pans: %d cases, round trips pixel-identical; full re-render max difference %d/63304 graph pixels.\n",cases,max_difference);
 }
